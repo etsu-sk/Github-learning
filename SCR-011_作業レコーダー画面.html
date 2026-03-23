@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SCR-011 作業レコーダー画面</title>
+  <style>
+    /* ── リセット & ベース ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Hiragino Sans', 'Noto Sans JP', 'Meiryo', sans-serif;
+      background: #f0f2f5;
+      color: #1a1a2e;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── ヘッダー ── */
+    header {
+      background: linear-gradient(135deg, #1a1a4e 0%, #16213e 100%);
+      color: #fff;
+      padding: 0 24px;
+      height: 60px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+      flex-shrink: 0;
+    }
+    .header-left { display: flex; align-items: center; gap: 16px; }
+    .screen-id {
+      background: #e94560;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 12px;
+      letter-spacing: 0.05em;
+    }
+    .screen-title { font-size: 18px; font-weight: 700; letter-spacing: 0.05em; }
+    .header-right { display: flex; align-items: center; gap: 20px; font-size: 13px; color: #ccd6f6; }
+    .user-info { display: flex; align-items: center; gap: 8px; }
+    .avatar {
+      width: 34px; height: 34px;
+      background: linear-gradient(135deg, #e94560, #f5a623);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 13px;
+    }
+    .current-time { font-size: 22px; font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; }
+
+    /* ── メインレイアウト ── */
+    main {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 3fr 2fr;
+      gap: 16px;
+      padding: 16px;
+      min-height: 0;
+    }
+
+    /* ── カード共通 ── */
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+      overflow: hidden;
+    }
+    .card-header {
+      padding: 14px 20px;
+      background: linear-gradient(90deg, #f8f9ff 0%, #fff 100%);
+      border-bottom: 2px solid #e8ecff;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .card-header-icon {
+      width: 28px; height: 28px;
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px;
+    }
+    .card-header h2 { font-size: 14px; font-weight: 700; color: #1a1a4e; }
+    .card-body { padding: 20px; }
+
+    /* ── 左パネル ── */
+    .left-panel { display: flex; flex-direction: column; gap: 14px; }
+
+    /* ── 選択フォーム ── */
+    .form-group { display: flex; flex-direction: column; gap: 6px; }
+    .form-label {
+      font-size: 12px; font-weight: 700;
+      color: #5a6a8a; text-transform: uppercase; letter-spacing: 0.05em;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .form-label .required {
+      background: #e94560; color: #fff;
+      font-size: 10px; padding: 1px 6px; border-radius: 4px;
+    }
+    .form-select, .form-input {
+      width: 100%;
+      padding: 11px 14px;
+      border: 2px solid #e0e6f5;
+      border-radius: 10px;
+      font-size: 14px;
+      font-family: inherit;
+      color: #1a1a4e;
+      background: #fff;
+      appearance: none;
+      -webkit-appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%235a6a8a' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+      cursor: pointer;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .form-select:focus, .form-input:focus {
+      outline: none;
+      border-color: #3f72af;
+      box-shadow: 0 0 0 3px rgba(63,114,175,0.15);
+    }
+    .form-select.selected { border-color: #3f72af; background-color: #f0f5ff; color: #1a1a4e; }
+
+    /* 区分（ラジオボタン風） */
+    .shift-group { display: flex; gap: 10px; }
+    .shift-btn {
+      flex: 1;
+      padding: 11px;
+      border: 2px solid #e0e6f5;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 700;
+      text-align: center;
+      cursor: pointer;
+      background: #fff;
+      color: #5a6a8a;
+      transition: all 0.2s;
+    }
+    .shift-btn.active {
+      background: linear-gradient(135deg, #3f72af, #1a4f8e);
+      border-color: #3f72af;
+      color: #fff;
+      box-shadow: 0 4px 12px rgba(63,114,175,0.35);
+    }
+    .shift-btn:not(.active):hover { border-color: #3f72af; color: #3f72af; }
+    .shift-btn.locked {
+      opacity: 0.35;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+
+    /* ── ステータスバー ── */
+    .status-bar {
+      padding: 14px 20px;
+      border-radius: 12px;
+      display: flex; align-items: center; gap: 12px;
+      font-weight: 700;
+      font-size: 14px;
+    }
+    .status-bar.idle {
+      background: #f0f5ff;
+      color: #3f72af;
+      border: 2px solid #c5d8f5;
+    }
+    .status-bar.working {
+      background: linear-gradient(135deg, #e8fff4, #d4f5e4);
+      color: #1a7a45;
+      border: 2px solid #7ed0a5;
+    }
+    .status-dot {
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .status-bar.idle .status-dot { background: #3f72af; }
+    .status-bar.working .status-dot {
+      background: #27ae60;
+      animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.3); opacity: 0.7; }
+    }
+
+    /* ── タイマー表示 ── */
+    .timer-display {
+      text-align: center;
+      padding: 20px;
+      background: linear-gradient(135deg, #1a1a4e 0%, #16213e 100%);
+      border-radius: 16px;
+      margin: 4px 0;
+    }
+    .timer-label { font-size: 11px; color: #8899cc; letter-spacing: 0.1em; margin-bottom: 6px; }
+    .timer-value {
+      font-size: 52px;
+      font-weight: 700;
+      color: #fff;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.05em;
+      text-shadow: 0 0 20px rgba(63,200,255,0.4);
+    }
+    .timer-value.active { color: #4ecdc4; animation: timerGlow 2s ease-in-out infinite alternate; }
+    @keyframes timerGlow {
+      from { text-shadow: 0 0 10px rgba(78,205,196,0.3); }
+      to   { text-shadow: 0 0 30px rgba(78,205,196,0.8); }
+    }
+    .timer-sub { font-size: 12px; color: #8899cc; margin-top: 4px; }
+
+    /* ── 入場・退出ボタン ── */
+    .action-buttons { display: flex; gap: 12px; }
+    .btn-entry, .btn-exit {
+      flex: 1;
+      padding: 18px 12px;
+      border: none;
+      border-radius: 14px;
+      font-size: 20px;
+      font-weight: 900;
+      cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; gap: 6px;
+      transition: all 0.2s;
+      position: relative;
+      overflow: hidden;
+    }
+    .btn-entry {
+      background: linear-gradient(135deg, #27ae60, #1e8449);
+      color: #fff;
+      box-shadow: 0 6px 20px rgba(39,174,96,0.4);
+    }
+    .btn-entry:hover { transform: translateY(-2px); box-shadow: 0 10px 28px rgba(39,174,96,0.5); }
+    .btn-entry:active { transform: translateY(0); }
+    .btn-exit {
+      background: linear-gradient(135deg, #e74c3c, #c0392b);
+      color: #fff;
+      box-shadow: 0 6px 20px rgba(231,76,60,0.4);
+    }
+    .btn-exit:hover { transform: translateY(-2px); box-shadow: 0 10px 28px rgba(231,76,60,0.5); }
+    .btn-exit:active { transform: translateY(0); }
+    .btn-disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+    .btn-icon { font-size: 28px; line-height: 1; }
+    .btn-label { font-size: 18px; letter-spacing: 0.1em; }
+    .btn-sub { font-size: 10px; font-weight: 400; opacity: 0.85; }
+
+    /* NFC badge */
+    .nfc-badge {
+      position: absolute; top: 8px; right: 8px;
+      background: rgba(255,255,255,0.25);
+      border-radius: 6px;
+      font-size: 9px;
+      padding: 2px 6px;
+      letter-spacing: 0.05em;
+    }
+
+    /* ── 右パネル ── */
+    .right-panel { display: flex; flex-direction: column; gap: 0; }
+    .right-panel .card { flex: 1; display: flex; flex-direction: column; }
+
+    /* サマリー行 */
+    .summary-row {
+      display: flex; gap: 12px;
+      padding: 14px 20px;
+      background: linear-gradient(90deg, #1a1a4e, #16213e);
+      border-radius: 0 0 0 0;
+    }
+    .summary-card {
+      flex: 1;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 10px;
+      padding: 10px 14px;
+      text-align: center;
+    }
+    .summary-label { font-size: 10px; color: #8899cc; letter-spacing: 0.05em; margin-bottom: 2px; }
+    .summary-value { font-size: 22px; font-weight: 700; color: #fff; }
+    .summary-value.highlight { color: #4ecdc4; }
+    .summary-unit { font-size: 11px; color: #8899cc; }
+
+    /* 履歴テーブル */
+    .history-scroll { flex: 1; overflow-y: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    thead th {
+      background: #f0f4ff;
+      color: #5a6a8a;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 10px 14px;
+      text-align: left;
+      border-bottom: 2px solid #e0e6f5;
+      position: sticky; top: 0;
+    }
+    tbody tr { border-bottom: 1px solid #f0f2f8; transition: background 0.15s; }
+    tbody tr:hover { background: #f8f9ff; }
+    tbody td { padding: 12px 14px; font-size: 13px; color: #2a3050; vertical-align: middle; }
+    .badge {
+      display: inline-flex; align-items: center;
+      padding: 3px 10px; border-radius: 20px;
+      font-size: 11px; font-weight: 700;
+    }
+    .badge-green  { background: #e8fff4; color: #1a7a45; }
+    .badge-blue   { background: #e8f0ff; color: #1a4fb0; }
+    .badge-orange { background: #fff4e5; color: #b05a1a; }
+    .badge-red    { background: #fff0f0; color: #b01a1a; }
+    .badge-gray   { background: #f0f2f5; color: #5a6a8a; }
+
+    .time-range { font-size: 11px; color: #8899cc; }
+    .duration-val { font-weight: 700; font-size: 15px; color: #1a1a4e; }
+    .duration-unit { font-size: 11px; color: #8899cc; }
+
+    /* 合計行 */
+    .total-row td {
+      background: linear-gradient(90deg, #f0f5ff, #e8f0ff);
+      font-weight: 700;
+      border-top: 2px solid #3f72af;
+      color: #1a1a4e;
+    }
+    .total-label { font-size: 14px; color: #1a1a4e; letter-spacing: 0.05em; }
+    .total-value { font-size: 20px; font-weight: 900; color: #3f72af; }
+
+    /* 空状態 */
+    .empty-state {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 60px 20px; color: #b0b8cc; text-align: center;
+    }
+    .empty-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.5; }
+
+    /* フッター */
+    footer {
+      background: #1a1a4e;
+      color: #8899cc;
+      font-size: 11px;
+      padding: 8px 24px;
+      display: flex; justify-content: space-between; align-items: center;
+      flex-shrink: 0;
+    }
+
+    /* ── スクロールバー ── */
+    .history-scroll::-webkit-scrollbar { width: 6px; }
+    .history-scroll::-webkit-scrollbar-track { background: #f0f2f5; }
+    .history-scroll::-webkit-scrollbar-thumb { background: #c0c8e0; border-radius: 3px; }
+
+    /* ── レスポンシブ（タブレット） ── */
+    @media (max-width: 900px) {
+      main { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ヘッダー -->
+<header>
+  <div class="header-left">
+    <span class="screen-id">SCR-011</span>
+    <span class="screen-title">作業レコーダー</span>
+  </div>
+  <div class="header-right">
+    <div class="user-info">
+      <div class="avatar">田</div>
+      <div>
+        <div style="font-size:13px;font-weight:700;color:#fff;">田中 花子</div>
+        <div style="font-size:11px;color:#8899cc;">一般社員</div>
+      </div>
+    </div>
+    <div class="current-time" id="currentTime">09:32:15</div>
+  </div>
+</header>
+
+<!-- メインコンテンツ -->
+<main>
+
+  <!-- ── 左パネル ── -->
+  <div class="left-panel">
+
+    <!-- 事前選択カード -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-header-icon" style="background:#e8f0ff;">📋</div>
+        <h2>事前選択</h2>
+      </div>
+      <div class="card-body" style="display:flex;flex-direction:column;gap:14px;">
+
+        <!-- ライン選択 -->
+        <div class="form-group">
+          <label class="form-label">
+            🏭 ライン選択
+            <span class="required">必須</span>
+          </label>
+          <select class="form-select" id="lineSelect" onchange="updateSelection()">
+            <option value="">ラインを選択してください</option>
+            <option value="01">01</option>
+            <option value="01night">01夜勤</option>
+            <option value="03">03</option>
+            <option value="jidoki">自動機</option>
+            <option value="jidoki_night">自動機夜勤</option>
+          </select>
+        </div>
+
+        <!-- 作業カテゴリ選択 -->
+        <div class="form-group">
+          <label class="form-label">
+            🗂️ 作業カテゴリ
+            <span class="required">必須</span>
+          </label>
+          <select class="form-select" id="categorySelect" onchange="onCategoryChange()">
+            <option value="">カテゴリを選択してください</option>
+            <option value="tounyu">投入</option>
+            <option value="outline">アウトライン</option>
+            <option value="imt">IMT</option>
+            <option value="mokuji">目視</option>
+            <option value="sonota">その他</option>
+          </select>
+        </div>
+
+        <!-- 作業項目選択 -->
+        <div class="form-group">
+          <label class="form-label">
+            🔧 作業項目
+            <span class="required">必須</span>
+          </label>
+          <select class="form-select" id="itemSelect" onchange="updateSelection()">
+            <option value="">作業項目を選択してください</option>
+          </select>
+        </div>
+
+        <!-- 区分選択 -->
+        <div class="form-group">
+          <label class="form-label">⏰ 区分</label>
+          <div class="shift-group">
+            <div class="shift-btn active" id="shiftTeiji" onclick="selectShift('teiji')">
+              定時
+            </div>
+            <div class="shift-btn" id="shiftZangyo" onclick="selectShift('zangyo')">
+              残業
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ステータス表示 -->
+    <div class="status-bar idle" id="statusBar">
+      <div class="status-dot"></div>
+      <span id="statusText">入場待機中 — ボタンをタップして入場してください</span>
+    </div>
+
+    <!-- タイマーカード -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-header-icon" style="background:#fff4e5;">⏱️</div>
+        <h2>経過時間</h2>
+      </div>
+      <div class="card-body" style="padding:14px;">
+        <div class="timer-display">
+          <div class="timer-label">ELAPSED TIME</div>
+          <div class="timer-value" id="timerValue">00:00:00</div>
+          <div class="timer-sub" id="timerSub">作業開始前</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 入場・退出ボタン -->
+    <div class="action-buttons">
+      <button class="btn-entry" id="btnEntry" onclick="handleEntry()">
+        <span class="nfc-badge">NFC対応</span>
+        <span class="btn-icon">▶</span>
+        <span class="btn-label">入　場</span>
+        <span class="btn-sub">タップ または NFC カードをタッチ</span>
+      </button>
+      <button class="btn-exit btn-disabled" id="btnExit" onclick="handleExit()">
+        <span class="nfc-badge">NFC対応</span>
+        <span class="btn-icon">⏹</span>
+        <span class="btn-label">退　出</span>
+        <span class="btn-sub">タップ または NFC カードをタッチ</span>
+      </button>
+    </div>
+
+  </div><!-- / 左パネル -->
+
+  <!-- ── 右パネル ── -->
+  <div class="right-panel">
+    <div class="card">
+      <!-- カードヘッダー -->
+      <div class="card-header" style="justify-content:space-between;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div class="card-header-icon" style="background:#e8fff4;">📊</div>
+          <h2>本日の作業履歴</h2>
+        </div>
+        <div style="font-size:12px;color:#5a6a8a;">
+          📅 <span id="todayDate">2026年3月9日（月）</span>
+        </div>
+      </div>
+
+      <!-- サマリー -->
+      <div class="summary-row">
+        <div class="summary-card">
+          <div class="summary-label">本日の記録数</div>
+          <div class="summary-value highlight" id="recordCount">3</div>
+          <div class="summary-unit">件</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-label">定時 合計工数</div>
+          <div class="summary-value" id="totalTeiji">2h 40m</div>
+          <div class="summary-unit">（10分単位）</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-label">残業 合計工数</div>
+          <div class="summary-value" id="totalZangyo">1h 00m</div>
+          <div class="summary-unit">（10分単位）</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-label">★ 当日合計工数</div>
+          <div class="summary-value highlight" id="totalAll">3h 40m</div>
+          <div class="summary-unit">（10分単位）</div>
+        </div>
+      </div>
+
+      <!-- 履歴テーブル -->
+      <div class="history-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:36px;">#</th>
+              <th>ライン</th>
+              <th>作業内容</th>
+              <th>入場</th>
+              <th>退出</th>
+              <th>工数</th>
+              <th>区分</th>
+              <th>ステータス</th>
+            </tr>
+          </thead>
+          <tbody id="historyBody">
+
+            <!-- 記録1（完了） -->
+            <tr>
+              <td style="color:#8899cc;font-size:12px;text-align:center;">1</td>
+              <td>
+                <div style="font-weight:700;font-size:13px;">01</div>
+                <div style="font-size:11px;color:#8899cc;">投入</div>
+              </td>
+              <td>
+                <div style="font-weight:600;">投入作業</div>
+                <div style="font-size:11px;color:#8899cc;">カテゴリ：投入</div>
+              </td>
+              <td><div class="time-range">08:00</div></td>
+              <td><div class="time-range">09:00</div></td>
+              <td>
+                <span class="duration-val">60</span>
+                <span class="duration-unit">分</span>
+              </td>
+              <td><span class="badge badge-gray">定時</span></td>
+              <td><span class="badge badge-green">✓ 登録済み</span></td>
+            </tr>
+
+            <!-- 記録2（完了） -->
+            <tr>
+              <td style="color:#8899cc;font-size:12px;text-align:center;">2</td>
+              <td>
+                <div style="font-weight:700;font-size:13px;">01</div>
+                <div style="font-size:11px;color:#8899cc;">IMT</div>
+              </td>
+              <td>
+                <div style="font-weight:600;">IMT検査</div>
+                <div style="font-size:11px;color:#8899cc;">カテゴリ：IMT</div>
+              </td>
+              <td><div class="time-range">09:10</div></td>
+              <td><div class="time-range">10:40</div></td>
+              <td>
+                <span class="duration-val">90</span>
+                <span class="duration-unit">分</span>
+              </td>
+              <td><span class="badge badge-gray">定時</span></td>
+              <td><span class="badge badge-green">✓ 登録済み</span></td>
+            </tr>
+
+            <!-- 記録3（残業・完了） -->
+            <tr>
+              <td style="color:#8899cc;font-size:12px;text-align:center;">3</td>
+              <td>
+                <div style="font-weight:700;font-size:13px;">01</div>
+                <div style="font-size:11px;color:#8899cc;">目視</div>
+              </td>
+              <td>
+                <div style="font-weight:600;">目視検査（残業）</div>
+                <div style="font-size:11px;color:#8899cc;">カテゴリ：目視</div>
+              </td>
+              <td><div class="time-range">18:00</div></td>
+              <td><div class="time-range">19:00</div></td>
+              <td>
+                <span class="duration-val">60</span>
+                <span class="duration-unit">分</span>
+              </td>
+              <td><span class="badge badge-orange">残業</span></td>
+              <td><span class="badge badge-green">✓ 登録済み</span></td>
+            </tr>
+
+            <!-- 記録4（計測中） -->
+            <tr style="background:#f0fff8;">
+              <td style="color:#8899cc;font-size:12px;text-align:center;">4</td>
+              <td>
+                <div style="font-weight:700;font-size:13px;">01</div>
+                <div style="font-size:11px;color:#8899cc;">アウトライン</div>
+              </td>
+              <td>
+                <div style="font-weight:600;">中板アミ加工</div>
+                <div style="font-size:11px;color:#8899cc;">カテゴリ：アウトライン</div>
+              </td>
+              <td><div class="time-range">09:30</div></td>
+              <td><div class="time-range" style="color:#27ae60;font-weight:700;">計測中...</div></td>
+              <td>
+                <span class="duration-val" style="color:#27ae60;" id="liveDuration">02</span>
+                <span class="duration-unit">分</span>
+              </td>
+              <td><span class="badge badge-gray">定時</span></td>
+              <td><span class="badge badge-blue">● 計測中</span></td>
+            </tr>
+
+          </tbody>
+
+          <!-- 合計行 -->
+          <tfoot>
+            <tr class="total-row">
+              <td colspan="5" style="text-align:right;">
+                <span class="total-label">★ 当日合計工数</span>
+              </td>
+              <td colspan="3">
+                <span class="total-value">220 分</span>
+                <span style="font-size:12px;color:#5a6a8a;margin-left:6px;">（3 時間 40 分）</span>
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <!-- 注釈フッター -->
+      <div style="padding:10px 20px;background:#f8f9ff;border-top:1px solid #e8ecff;display:flex;gap:20px;flex-wrap:wrap;">
+        <span style="font-size:11px;color:#5a6a8a;">
+          <span class="badge badge-green" style="margin-right:4px;">✓ 登録済み</span>退出完了・修正不可
+        </span>
+        <span style="font-size:11px;color:#5a6a8a;">
+          <span class="badge badge-blue" style="margin-right:4px;">● 計測中</span>入場済み・計測継続中
+        </span>
+        <span style="font-size:11px;color:#5a6a8a;">
+          <span class="badge badge-red" style="margin-right:4px;">⚠ 退出漏れ</span>修正は水すまし/管理者へ
+        </span>
+        <span style="font-size:11px;color:#5a6a8a;">
+          ※ 工数は10分単位で丸め処理済み
+        </span>
+      </div>
+
+    </div><!-- /card -->
+  </div><!-- /右パネル -->
+
+</main>
+
+<!-- フッター -->
+<footer>
+  <span>製造管理システム v4.1 ｜ SCR-011 作業レコーダー画面</span>
+  <span>※ 退出済みレコードの修正は 水すまし（SCR-012） または 管理者 へご連絡ください</span>
+</footer>
+
+
+<!-- ── JavaScript（インタラクション） ── -->
+<script>
+  let isWorking = false;
+  let startTime = null;
+  let timerInterval = null;
+  let clockInterval = null;
+
+  /* 現在時刻を更新 */
+  function updateClock() {
+    const now = new Date();
+    document.getElementById('currentTime').textContent =
+      now.toLocaleTimeString('ja-JP', { hour12: false });
+  }
+  updateClock();
+  clockInterval = setInterval(updateClock, 1000);
+
+  /* 今日の日付を表示 */
+  const today = new Date();
+  const days = ['日', '月', '火', '水', '木', '金', '土'];
+  document.getElementById('todayDate').textContent =
+    `${today.getFullYear()}年${today.getMonth()+1}月${today.getDate()}日（${days[today.getDay()]}）`;
+
+  /* 作業項目マスター（カテゴリ → 作業項目リスト）
+     ※ 作業項目マスター_コンポーネント.html の records データに基づく */
+  const WORK_ITEMS = {
+    tounyu:  ['投入作業', '投入作業（残業）'],
+    outline: ['中板アミ加工', '半田修理', '東芝シール貼', 'その他'],
+    imt:     ['IMT検査', 'IMT検査（残業）'],
+    mokuji:  ['目視検査', '目視検査（残業）'],
+    sonota:  ['水澄まし準備', '抜き取り検査'],
+  };
+
+  /* 区分を定時のみに制限するカテゴリ */
+  const TEIJI_ONLY_CATS = ['outline'];
+
+  /* カテゴリ変更時：作業項目を動的に更新 ＋ 区分制御 */
+  function onCategoryChange() {
+    const cat = document.getElementById('categorySelect').value;
+
+    // 作業項目を更新
+    const itemSel = document.getElementById('itemSelect');
+    itemSel.innerHTML = '<option value="">作業項目を選択してください</option>';
+    if (cat && WORK_ITEMS[cat]) {
+      WORK_ITEMS[cat].forEach((name, i) => {
+        const opt = document.createElement('option');
+        opt.value = `${cat}_${i}`;
+        opt.textContent = name;
+        itemSel.appendChild(opt);
+      });
+    }
+
+    // 区分制御：アウトラインは定時のみ
+    const btnTeiji  = document.getElementById('shiftTeiji');
+    const btnZangyo = document.getElementById('shiftZangyo');
+    if (TEIJI_ONLY_CATS.includes(cat)) {
+      btnTeiji.classList.add('active');
+      btnZangyo.classList.remove('active');
+      btnZangyo.classList.add('locked');
+    } else {
+      btnZangyo.classList.remove('locked');
+    }
+
+    updateSelection();
+  }
+
+  /* 区分選択 */
+  function selectShift(type) {
+    document.getElementById('shiftTeiji').classList.toggle('active', type === 'teiji');
+    document.getElementById('shiftZangyo').classList.toggle('active', type === 'zangyo');
+  }
+
+  /* 選択状態の更新 */
+  function updateSelection() {
+    ['lineSelect', 'categorySelect', 'itemSelect'].forEach(id => {
+      const el = document.getElementById(id);
+      el.classList.toggle('selected', el.value !== '');
+    });
+  }
+
+  /* 入場ボタン */
+  function handleEntry() {
+    if (isWorking) return;
+    const line = document.getElementById('lineSelect').value;
+    const cat  = document.getElementById('categorySelect').value;
+    const item = document.getElementById('itemSelect').value;
+    if (!line || !cat || !item) {
+      alert('⚠️ ライン・作業カテゴリ・作業項目をすべて選択してください。');
+      return;
+    }
+
+    isWorking = true;
+    startTime = new Date();
+
+    /* ステータス更新 */
+    const sb = document.getElementById('statusBar');
+    sb.className = 'status-bar working';
+    document.getElementById('statusText').textContent =
+      '作業中 — ' + startTime.toLocaleTimeString('ja-JP', {hour12:false}) + ' に入場しました';
+
+    /* ボタン切替 */
+    document.getElementById('btnEntry').classList.add('btn-disabled');
+    document.getElementById('btnExit').classList.remove('btn-disabled');
+
+    /* タイマー開始 */
+    const tv = document.getElementById('timerValue');
+    tv.classList.add('active');
+    document.getElementById('timerSub').textContent =
+      '入場時刻: ' + startTime.toLocaleTimeString('ja-JP', {hour12:false});
+
+    timerInterval = setInterval(() => {
+      const elapsed = Math.floor((new Date() - startTime) / 1000);
+      const h = String(Math.floor(elapsed / 3600)).padStart(2, '0');
+      const m = String(Math.floor((elapsed % 3600) / 60)).padStart(2, '0');
+      const s = String(elapsed % 60).padStart(2, '0');
+      tv.textContent = `${h}:${m}:${s}`;
+      document.getElementById('liveDuration').textContent =
+        String(Math.floor(elapsed / 60)).padStart(2, '0');
+    }, 1000);
+  }
+
+  /* 退出ボタン */
+  function handleExit() {
+    if (!isWorking) return;
+    clearInterval(timerInterval);
+
+    const exitTime = new Date();
+    const elapsedMin = Math.floor((exitTime - startTime) / 60000);
+    // 10分単位に丸め（四捨五入）
+    const roundedMin = Math.round(elapsedMin / 10) * 10;
+
+    isWorking = false;
+
+    /* ステータス更新 */
+    const sb = document.getElementById('statusBar');
+    sb.className = 'status-bar idle';
+    document.getElementById('statusText').textContent =
+      `退出完了 — 工数: ${roundedMin}分（10分単位に丸め済み）`;
+
+    /* ボタン切替 */
+    document.getElementById('btnEntry').classList.remove('btn-disabled');
+    document.getElementById('btnExit').classList.add('btn-disabled');
+
+    /* タイマー停止 */
+    document.getElementById('timerValue').classList.remove('active');
+    document.getElementById('timerSub').textContent =
+      '退出時刻: ' + exitTime.toLocaleTimeString('ja-JP', {hour12:false});
+
+    alert(`✅ 退出を記録しました\n\n入場: ${startTime.toLocaleTimeString('ja-JP',{hour12:false})}\n退出: ${exitTime.toLocaleTimeString('ja-JP',{hour12:false})}\n計測: ${elapsedMin}分 → 丸め後: ${roundedMin}分`);
+  }
+</script>
+</body>
+</html>
