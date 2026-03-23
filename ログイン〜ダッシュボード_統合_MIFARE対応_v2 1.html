@@ -1,0 +1,1929 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>製造ライン管理システム</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary:     '#1565C0',
+            primaryLight:'#BBDEFB',
+            success:     '#2E7D32',
+            warning:     '#F57F17',
+            error:       '#C62828',
+            background:  '#F5F5F5',
+          },
+          fontFamily: { sans: ['"Noto Sans JP"', 'sans-serif'] }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { font-family: 'Noto Sans JP', sans-serif; -webkit-tap-highlight-color: transparent; }
+
+    /* ── Screen switching ─────────────────────── */
+    /* IDセレクタ（詳細度1-0-0）でTailwindのクラスセレクタ（0-1-0）より優先 */
+    #screen-loading,
+    #screen-login,
+    #screen-dashboard,
+    #screen-permission { display: none; }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .screen.active { animation: fadeIn 0.3s ease; }
+
+    /* ── Login: toggle form ───────────────────── */
+    .toggle-section {
+      transition: max-height 0.4s ease, opacity 0.4s ease;
+      overflow: hidden;
+      max-height: 0;
+      opacity: 0;
+    }
+    .toggle-section.open { max-height: 520px; opacity: 1; }
+    input:focus {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(21,101,192,0.2);
+    }
+
+    /* ── NFC area pulse ──────────────────────── */
+    @keyframes pulseBorder {
+      0%, 100% { border-color: #D1D5DB; }
+      50%       { border-color: #93C5FD; }
+    }
+    @keyframes pulseBorderReady {
+      0%, 100% { border-color: #6EE7B7; box-shadow: 0 0 0 0 rgba(16,185,129,0); }
+      50%       { border-color: #10B981; box-shadow: 0 0 0 6px rgba(16,185,129,0.15); }
+    }
+    @keyframes pulseBorderError {
+      0%, 100% { border-color: #FCA5A5; }
+      50%       { border-color: #EF4444; }
+    }
+    #nfc-touch-area                    { animation: pulseBorder 2.5s infinite; }
+    #nfc-touch-area:hover              { animation: none; }
+    #nfc-touch-area.bridge-ready       { animation: pulseBorderReady 2s infinite; background: #f0fdf4; }
+    #nfc-touch-area.bridge-error       { animation: pulseBorderError 2s infinite; background: #fef2f2; }
+    #nfc-touch-area.card-reading       { animation: none; background: #eff6ff; border-color: #3B82F6; }
+
+    /* ── Bridge status badge ─────────────────── */
+    #nfc-bridge-status {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 11px; font-weight: 600;
+      padding: 4px 10px; border-radius: 9999px;
+      transition: all 0.3s;
+    }
+    #nfc-bridge-status.disconnected { background: #F3F4F6; color: #9CA3AF; }
+    #nfc-bridge-status.connecting   { background: #FEF3C7; color: #D97706; }
+    #nfc-bridge-status.connected    { background: #D1FAE5; color: #065F46; }
+    #nfc-bridge-status.error        { background: #FEE2E2; color: #991B1B; }
+    .status-dot {
+      width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+    }
+    .status-dot.disconnected { background: #9CA3AF; }
+    .status-dot.connecting   { background: #F59E0B; animation: ldBounce 1s infinite; }
+    .status-dot.connected    { background: #10B981; }
+    .status-dot.error        { background: #EF4444; }
+
+    /* ── Loading dots ────────────────────────── */
+    .ld { animation: ldBounce 0.8s infinite ease-in-out; }
+    .ld:nth-child(2) { animation-delay: 0.15s; }
+    .ld:nth-child(3) { animation-delay: 0.30s; }
+    @keyframes ldBounce {
+      0%, 100% { transform: translateY(0); }
+      50%       { transform: translateY(-7px); }
+    }
+
+    /* ── Modal overlay ───────────────────────── */
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.5);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 100;
+    }
+    .modal-overlay.hidden { display: none; }
+
+    /* ── NFC card hover ──────────────────────── */
+    .nfc-card { transition: transform 0.18s, box-shadow 0.18s; cursor: pointer; }
+    .nfc-card:hover { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(0,0,0,0.2); }
+
+    /* ── Dashboard menu card ─────────────────── */
+    .menu-btn { transition: transform 0.2s, box-shadow 0.2s; }
+    .menu-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.1); }
+
+    /* ── Toast ───────────────────────────────── */
+    #toast {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      background: #1f2937; color: #fff;
+      padding: 12px 24px; border-radius: 9999px;
+      font-size: 14px; font-weight: 500;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+      transition: opacity 0.4s; z-index: 200;
+      pointer-events: none; white-space: nowrap;
+    }
+
+    /* ── Permission settings ──────────────────── */
+    .perm-checkbox { width: 18px; height: 18px; cursor: pointer; accent-color: #4f46e5; }
+    .perm-checkbox:disabled { cursor: not-allowed; opacity: 0.5; }
+    .perm-row:hover td { background-color: #f5f3ff; }
+    .perm-row.locked:hover td { background-color: #f9fafb; }
+    .role-tab {
+      padding: 8px 20px; border-radius: 8px 8px 0 0;
+      font-size: 13px; font-weight: 600; cursor: pointer;
+      transition: all 0.15s; border: 2px solid transparent; border-bottom: none;
+    }
+    .role-tab.active { background: #fff; color: #3730a3; border-color: #c7d2fe; }
+    .role-tab:not(.active) { background: #e0e7ff; color: #6366f1; }
+    .role-tab:not(.active):hover { background: #c7d2fe; }
+    .perm-row.changed td { background: #fefce8 !important; }
+    .perm-row.locked td  { color: #9ca3af; }
+
+    /* ── Scrollbar ───────────────────────────── */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: #f1f1f1; }
+    ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #999; }
+
+    /* ── Rate screen（稼働率・可動率）────────── */
+    .badge {
+      display: inline-block;
+      padding: 2px 8px; border-radius: 9999px;
+      font-size: 11px; font-weight: bold;
+    }
+    .gauge-bar-bg {
+      background: #f1f5f9; border-radius: 4px;
+      height: 6px; width: 80px;
+      display: inline-block; vertical-align: middle; overflow: hidden;
+    }
+    .gauge-bar-fill { height: 100%; border-radius: 4px; }
+    .rate-highlight { background: #FEF3C7; transition: background 1s; }
+  </style>
+</head>
+<body class="text-gray-800 h-screen flex flex-col overflow-hidden">
+
+<!-- ================================================================
+     GLOBAL HEADER  （ログイン後に表示）
+     ================================================================ -->
+<header id="global-header"
+  class="bg-primary text-white flex-shrink-0 h-16 flex items-center justify-between px-6 shadow-md z-30 hidden">
+  <!-- Left: logo + system name -->
+  <div class="flex items-center cursor-pointer" onclick="goToDashboard()">
+    <i class="fa-solid fa-industry text-white text-2xl mr-3"></i>
+    <div>
+      <h1 class="text-base font-bold leading-tight">製造ライン管理システム</h1>
+      <div class="text-xs text-blue-200">Manufacturing Line Management System</div>
+    </div>
+  </div>
+  <!-- Right: user info + logout -->
+  <div class="flex items-center gap-4">
+    <div class="text-right hidden sm:block">
+      <div id="header-user-name" class="font-bold text-sm">ユーザー名</div>
+      <div id="header-role-name" class="text-xs px-2 py-0.5 rounded inline-block mt-0.5">ロール名</div>
+    </div>
+    <button onclick="openLogoutModal()"
+      class="bg-blue-800 hover:bg-blue-900 text-white p-2 rounded-full w-10 h-10 flex items-center justify-center transition-colors">
+      <i class="fa-solid fa-right-from-bracket"></i>
+    </button>
+  </div>
+</header>
+
+<!-- ================================================================
+     MAIN AREA  （screen-* を切り替え）
+     ================================================================ -->
+<div class="flex-1 overflow-hidden relative">
+
+  <!-- ────────────────────────────────────────────
+       SCREEN: LOADING
+  ──────────────────────────────────────────── -->
+  <div id="screen-loading"
+    class="screen h-full w-full flex items-center justify-center bg-gray-200"
+    style="display:none">
+    <div class="text-center">
+      <div class="flex justify-center gap-2 mb-5">
+        <div class="ld w-3 h-3 bg-primary rounded-full"></div>
+        <div class="ld w-3 h-3 bg-primary rounded-full"></div>
+        <div class="ld w-3 h-3 bg-primary rounded-full"></div>
+      </div>
+      <p id="loading-text" class="text-gray-600 font-medium">認証処理中...</p>
+      <p id="loading-sub"  class="text-gray-400 text-xs mt-1"></p>
+    </div>
+  </div>
+
+  <!-- ────────────────────────────────────────────
+       SCREEN: LOGIN  （要件定義書 §4.1 準拠）
+  ──────────────────────────────────────────── -->
+  <div id="screen-login"
+    class="screen active h-full w-full flex items-center justify-center bg-gray-200 overflow-y-auto py-8"
+    style="display:flex">
+
+    <div class="bg-white p-8 rounded-xl shadow-2xl w-full max-w-lg">
+
+      <!-- Header -->
+      <div class="text-center mb-10">
+        <i class="fa-solid fa-industry text-primary text-5xl mb-4"></i>
+        <h1 class="text-2xl font-bold text-gray-800">製造ライン管理システム</h1>
+        <p class="text-gray-500 mt-2 text-sm">MIFAREカードをリーダーにかざすか、社員番号でログインしてください</p>
+      </div>
+
+      <!-- Bridge status badge -->
+      <div class="flex justify-center mb-3">
+        <div id="nfc-bridge-status" class="disconnected">
+          <span class="status-dot disconnected" id="nfc-status-dot"></span>
+          <span id="nfc-status-text">MIFAREリーダー未接続</span>
+        </div>
+      </div>
+
+      <!-- NFC touch area -->
+      <div id="nfc-touch-area"
+        class="border-4 border-dashed border-gray-300 rounded-xl p-10 flex flex-col items-center
+               justify-center mb-6 bg-gray-50 cursor-pointer hover:bg-blue-50 hover:border-blue-300
+               transition-colors group"
+        onclick="openNfcModal()">
+        <div class="w-24 h-24 bg-gray-200 rounded-full flex items-center justify-center mb-4
+                    group-hover:bg-blue-100 transition-colors" id="nfc-icon-wrapper">
+          <i id="nfc-area-icon" class="fa-solid fa-wifi text-4xl text-gray-400 group-hover:text-primary rotate-90 transition-colors"></i>
+        </div>
+        <p id="nfc-area-label" class="font-bold text-gray-600 group-hover:text-primary transition-colors">
+          ここにカードをかざしてください
+        </p>
+        <p id="nfc-area-sub" class="text-xs text-gray-400 mt-1">MIFAREリーダーサービスの起動を確認中...</p>
+      </div>
+
+      <!-- Error message -->
+      <div id="login-error"
+        class="hidden mb-4 p-3 bg-red-50 border border-red-200 rounded-lg
+               flex items-center gap-2 text-red-600 text-sm">
+        <i class="fa-solid fa-circle-exclamation flex-shrink-0"></i>
+        <span id="login-error-text"></span>
+      </div>
+
+      <!-- Employee ID + Password toggle -->
+      <div class="mb-6">
+        <button id="toggleBtn" onclick="toggleForm()"
+          class="w-full flex items-center justify-between px-4 py-3 rounded-lg border border-gray-300
+                 bg-gray-50 hover:bg-blue-50 hover:border-blue-300 transition-colors
+                 text-gray-600 hover:text-primary font-medium">
+          <span class="flex items-center gap-2">
+            <i class="fa-solid fa-id-card text-base"></i>
+            社員番号・パスワードでログイン
+          </span>
+          <i id="toggleIcon" class="fa-solid fa-chevron-down text-sm transition-transform duration-300"></i>
+        </button>
+
+        <div id="loginForm" class="toggle-section">
+          <div class="pt-5 space-y-4">
+            <!-- Employee ID -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">
+                <i class="fa-solid fa-user mr-1 text-primary"></i>社員番号
+              </label>
+              <input type="text" id="employeeId" placeholder="例: EMP-00001"
+                class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-gray-800
+                       placeholder-gray-400 focus:border-primary transition-colors"
+                onkeydown="if(event.key==='Enter') handleIdPwLogin()">
+            </div>
+            <!-- Password -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">
+                <i class="fa-solid fa-lock mr-1 text-primary"></i>パスワード
+              </label>
+              <div class="relative">
+                <input type="password" id="password" placeholder="パスワードを入力"
+                  class="w-full border border-gray-300 rounded-lg px-4 py-2.5 pr-12 text-gray-800
+                         placeholder-gray-400 focus:border-primary transition-colors"
+                  onkeydown="if(event.key==='Enter') handleIdPwLogin()">
+                <button type="button" onclick="togglePassword()" tabindex="-1"
+                  class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-primary transition-colors">
+                  <i id="eyeIcon" class="fa-solid fa-eye text-sm"></i>
+                </button>
+              </div>
+            </div>
+            <!-- Login button -->
+            <button onclick="handleIdPwLogin()"
+              class="w-full bg-primary text-white py-3 rounded-lg font-bold
+                     hover:bg-blue-700 transition-colors shadow-sm flex items-center justify-center gap-2">
+              <i class="fa-solid fa-right-to-bracket"></i>ログイン
+            </button>
+            <!-- Credentials hint -->
+            <div class="text-xs text-gray-400 bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-0.5">
+              <p class="font-medium text-gray-500 mb-1">🔑 デモ用認証情報</p>
+              <p>EMP-00001 / admin1234（管理者）</p>
+              <p>EMP-00002 / water1234（水すまし）</p>
+              <p>EMP-00003 / general1234（一般社員）</p>
+            </div>
+            <p class="text-center text-sm text-gray-400">
+              パスワードをお忘れの方はシステム管理者へご連絡ください
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Demo buttons -->
+      <div class="space-y-3">
+        <div class="relative flex py-2 items-center">
+          <div class="flex-grow border-t border-gray-300"></div>
+          <span class="flex-shrink mx-4 text-gray-400 text-sm">デモ用ログイン</span>
+          <div class="flex-grow border-t border-gray-300"></div>
+        </div>
+        <div class="grid grid-cols-3 gap-3">
+          <button onclick="login('admin')"
+            class="bg-gray-800 text-white py-2.5 rounded-lg hover:bg-gray-900 text-sm font-bold transition-colors">
+            管理者
+          </button>
+          <button onclick="login('mizusumashi')"
+            class="bg-primary text-white py-2.5 rounded-lg hover:bg-blue-700 text-sm font-bold transition-colors">
+            水すまし
+          </button>
+          <button onclick="login('general')"
+            class="bg-green-600 text-white py-2.5 rounded-lg hover:bg-green-700 text-sm font-bold transition-colors">
+            一般社員
+          </button>
+        </div>
+        <p class="text-xs text-gray-400 text-center">※ デモ用。本番環境では表示されません</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ────────────────────────────────────────────
+       SCREEN: DASHBOARD  （要件定義書 §4.3 準拠）
+       ※ 製造ライン管理システム_モックアップ.html SCR-002 ベース
+  ──────────────────────────────────────────── -->
+  <div id="screen-dashboard"
+    class="screen h-full w-full overflow-y-auto bg-background p-6"
+    style="display:none">
+
+    <!-- KPI Summary -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+      <div class="bg-white p-5 rounded-lg shadow-sm border-l-4 border-primary">
+        <div class="text-gray-500 text-sm font-bold">本日の生産数</div>
+        <div class="mt-2">
+          <span class="text-3xl font-bold text-gray-800">1,250</span>
+          <span class="text-sm font-normal text-gray-500 ml-1">台</span>
+        </div>
+        <div class="text-xs text-gray-400 mt-2">目標達成率 92%</div>
+      </div>
+      <div class="bg-white p-5 rounded-lg shadow-sm border-l-4 border-error">
+        <div class="text-gray-500 text-sm font-bold">不良率</div>
+        <div class="mt-2">
+          <span class="text-3xl font-bold text-red-700">0.8</span>
+          <span class="text-sm font-normal text-gray-500 ml-1">%</span>
+        </div>
+        <div class="text-xs text-gray-400 mt-2">前日比 -0.1%</div>
+      </div>
+      <div class="bg-white p-5 rounded-lg shadow-sm border-l-4 border-success">
+        <div class="text-gray-500 text-sm font-bold">稼働率</div>
+        <div class="mt-2">
+          <span class="text-3xl font-bold text-green-700">92.5</span>
+          <span class="text-sm font-normal text-gray-500 ml-1">%</span>
+        </div>
+        <div class="text-xs text-gray-400 mt-2">正常稼働中</div>
+      </div>
+    </div>
+
+    <!-- Menu grid title -->
+    <h2 class="text-lg font-bold text-gray-700 mb-4 ml-1 flex items-center">
+      <i class="fa-solid fa-list-check mr-2"></i>業務メニュー
+    </h2>
+
+    <!-- Menu grid  ※ 各ボタンの id は MENU_ITEMS と対応 -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+
+      <!-- 作業レコーダー  roles: 全員 -->
+      <button id="menu-recorder"
+        onclick="showToast('🚧 この機能は現在開発中です')"
+        class="menu-btn bg-white p-6 rounded-lg shadow-sm hover:shadow-md hover:bg-teal-50 transition-all
+               text-left group border border-gray-200 flex flex-col h-40 justify-between border-l-4 border-teal-500">
+        <div>
+          <div class="w-12 h-12 rounded-full bg-teal-100 flex items-center justify-center text-teal-600 mb-4
+                      group-hover:bg-teal-600 group-hover:text-white transition-colors">
+            <i class="fa-solid fa-id-card-clip text-xl"></i>
+          </div>
+          <div class="font-bold text-gray-800 text-lg">作業レコーダー</div>
+        </div>
+        <div class="text-sm text-gray-500">即時開始・入退場記録</div>
+      </button>
+
+      <!-- 工数確認・修正  roles: admin, mizusumashi -->
+      <button id="menu-labor-check"
+        onclick="showToast('🚧 この機能は現在開発中です')"
+        class="menu-btn bg-white p-6 rounded-lg shadow-sm hover:shadow-md hover:bg-yellow-50 transition-all
+               text-left group border border-gray-200 flex flex-col h-40 justify-between border-l-4 border-yellow-500">
+        <div>
+          <div class="w-12 h-12 rounded-full bg-yellow-100 flex items-center justify-center text-yellow-600 mb-4
+                      group-hover:bg-yellow-600 group-hover:text-white transition-colors">
+            <i class="fa-solid fa-user-clock text-xl"></i>
+          </div>
+          <div class="font-bold text-gray-800 text-lg">工数確認・修正</div>
+        </div>
+        <div class="text-sm text-gray-500">登録状況の確認・代理編集</div>
+      </button>
+
+      <!-- 製造個数入力  roles: admin, mizusumashi -->
+      <button id="menu-production"
+        onclick="showToast('🚧 この機能は現在開発中です')"
+        class="menu-btn bg-white p-6 rounded-lg shadow-sm hover:shadow-md hover:bg-blue-50 transition-all
+               text-left group border border-gray-200 flex flex-col h-40 justify-between">
+        <div>
+          <div class="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center text-primary mb-4
+                      group-hover:bg-primary group-hover:text-white transition-colors">
+            <i class="fa-solid fa-box-open text-xl"></i>
+          </div>
+          <div class="font-bold text-gray-800 text-lg">製造個数入力</div>
+        </div>
+        <div class="text-sm text-gray-500">実績・不良・銘板の登録</div>
+      </button>
+
+      <!-- 工数入力  roles: admin, mizusumashi -->
+      <button id="menu-labor-input"
+        onclick="showToast('🚧 この機能は現在開発中です')"
+        class="menu-btn bg-white p-6 rounded-lg shadow-sm hover:shadow-md hover:bg-blue-50 transition-all
+               text-left group border border-gray-200 flex flex-col h-40 justify-between">
+        <div>
+          <div class="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center text-green-700 mb-4
+                      group-hover:bg-green-700 group-hover:text-white transition-colors">
+            <i class="fa-solid fa-clock text-xl"></i>
+          </div>
+          <div class="font-bold text-gray-800 text-lg">工数入力</div>
+        </div>
+        <div class="text-sm text-gray-500">作業時間の一括記録</div>
+      </button>
+
+      <!-- 稼働率入力  roles: admin, mizusumashi -->
+      <button id="menu-operation-rate"
+        onclick="openRateScreen()"
+        class="menu-btn bg-white p-6 rounded-lg shadow-sm hover:shadow-md hover:bg-orange-50 transition-all
+               text-left group border border-gray-200 flex flex-col h-40 justify-between">
+        <div>
+          <div class="w-12 h-12 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 mb-4
+                      group-hover:bg-orange-600 group-hover:text-white transition-colors">
+            <i class="fa-solid fa-chart-line text-xl"></i>
+          </div>
+          <div class="font-bold text-gray-800 text-lg">稼働率入力</div>
+        </div>
+        <div class="text-sm text-gray-500">機械稼働・可動率</div>
+      </button>
+
+      <!-- 生産レポート  roles: admin -->
+      <button id="menu-report-production"
+        onclick="showToast('🚧 この機能は現在開発中です')"
+        class="menu-btn bg-white p-6 rounded-lg shadow-sm hover:shadow-md hover:bg-gray-50 transition-all
+               text-left group border border-gray-200 flex flex-col h-40 justify-between">
+        <div>
+          <div class="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 mb-4
+                      group-hover:bg-gray-300 transition-colors">
+            <i class="fa-solid fa-chart-pie text-xl"></i>
+          </div>
+          <div class="font-bold text-gray-800 text-lg">生産レポート</div>
+        </div>
+        <div class="text-sm text-gray-500">管理者のみ</div>
+      </button>
+
+      <!-- 不良分析  roles: admin -->
+      <button id="menu-report-defect"
+        onclick="showToast('🚧 この機能は現在開発中です')"
+        class="menu-btn bg-white p-6 rounded-lg shadow-sm hover:shadow-md hover:bg-gray-50 transition-all
+               text-left group border border-gray-200 flex flex-col h-40 justify-between">
+        <div>
+          <div class="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 mb-4
+                      group-hover:bg-gray-300 transition-colors">
+            <i class="fa-solid fa-magnifying-glass-chart text-xl"></i>
+          </div>
+          <div class="font-bold text-gray-800 text-lg">不良分析</div>
+        </div>
+        <div class="text-sm text-gray-500">管理者のみ</div>
+      </button>
+
+      <!-- Excel出力  roles: admin -->
+      <button id="menu-excel-export"
+        onclick="showToast('🚧 この機能は現在開発中です')"
+        class="menu-btn bg-white p-6 rounded-lg shadow-sm hover:shadow-md hover:bg-gray-50 transition-all
+               text-left group border border-gray-200 flex flex-col h-40 justify-between">
+        <div>
+          <div class="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 mb-4
+                      group-hover:bg-gray-300 transition-colors">
+            <i class="fa-solid fa-file-excel text-xl"></i>
+          </div>
+          <div class="font-bold text-gray-800 text-lg">Excel出力</div>
+        </div>
+        <div class="text-sm text-gray-500">取引先提出用など</div>
+      </button>
+
+      <!-- マスター管理  roles: admin -->
+      <button id="menu-master"
+        onclick="showToast('🚧 この機能は現在開発中です')"
+        class="menu-btn bg-white p-6 rounded-lg shadow-sm hover:shadow-md hover:bg-purple-50 transition-all
+               text-left group border border-gray-200 flex flex-col h-40 justify-between border-l-4 border-purple-500">
+        <div>
+          <div class="w-12 h-12 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 mb-4
+                      group-hover:bg-purple-600 group-hover:text-white transition-colors">
+            <i class="fa-solid fa-gears text-xl"></i>
+          </div>
+          <div class="font-bold text-gray-800 text-lg">マスター管理</div>
+        </div>
+        <div class="text-sm text-gray-500">製品・ライン・不良品設定</div>
+      </button>
+
+      <!-- 権限設定マスター  roles: admin ★ 要件定義書 §4.4 -->
+      <button id="menu-permission-master"
+        onclick="openPermissionScreen()"
+        class="menu-btn bg-white p-6 rounded-lg shadow-sm hover:shadow-md hover:bg-indigo-50 transition-all
+               text-left group border border-gray-200 flex flex-col h-40 justify-between border-l-4 border-indigo-500">
+        <div>
+          <div class="w-12 h-12 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 mb-4
+                      group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+            <i class="fa-solid fa-shield-halved text-xl"></i>
+          </div>
+          <div class="font-bold text-gray-800 text-lg">権限設定マスター</div>
+        </div>
+        <div class="text-sm text-gray-500">ロール別アクセス権の設定</div>
+      </button>
+
+    </div><!-- /menu grid -->
+
+    <div class="text-center text-xs text-gray-400 border-t border-gray-200 pt-4">
+      <p>製造ライン管理システム v1.0</p>
+    </div>
+  </div>
+
+  <!-- ────────────────────────────────────────────
+       SCREEN: PERMISSION MASTER  （要件定義書 §4.4 準拠）
+       ※ 権限設定_モックアップ.html コンテンツを統合
+  ──────────────────────────────────────────── -->
+  <div id="screen-permission"
+    class="screen h-full w-full overflow-y-auto bg-background"
+    style="display:none">
+    <div class="max-w-5xl mx-auto px-4 py-4">
+
+      <!-- Breadcrumb -->
+      <p class="text-xs text-gray-400 mb-2">
+        <a href="#" onclick="goToDashboard(); return false;" class="hover:underline">🏠 ホーム</a>
+        <span class="mx-1">＞</span>
+        <span class="mx-1">マスター管理</span>
+        <span class="mx-1">＞</span>
+        <span class="text-indigo-700 font-bold">権限設定マスター</span>
+      </p>
+
+      <!-- Screen card -->
+      <div class="bg-white rounded-2xl shadow overflow-hidden">
+
+        <!-- Screen header -->
+        <div class="px-6 py-4 flex items-center justify-between bg-indigo-800">
+          <div class="flex items-center gap-4">
+            <button onclick="goToDashboard()"
+              class="text-indigo-200 hover:text-white text-sm flex items-center gap-1 transition-colors">
+              ← メニューに戻る
+            </button>
+            <div>
+              <h2 class="text-white font-bold text-base">権限設定マスター</h2>
+              <p class="text-indigo-200 text-xs mt-0.5">
+                ロールごとの画面アクセス権限を管理します　｜　管理者専用
+              </p>
+            </div>
+          </div>
+          <div class="flex items-center gap-3">
+            <span id="perm-change-badge"
+              class="hidden text-xs bg-yellow-400 text-yellow-900 font-bold px-3 py-1 rounded-full">
+              未保存の変更あり
+            </span>
+            <button id="perm-save-btn" onclick="permOpenSaveConfirm()"
+              class="bg-white text-indigo-800 text-sm font-bold px-4 py-2 rounded-lg
+                     hover:bg-indigo-50 transition-colors opacity-50 cursor-not-allowed"
+              disabled>
+              💾 変更を保存
+            </button>
+          </div>
+        </div>
+
+        <!-- Warning banner -->
+        <div class="px-6 py-2 bg-amber-50 border-b border-amber-200 flex items-center gap-2">
+          <span class="text-amber-600 text-xs">⚠️</span>
+          <p class="text-xs text-amber-700">
+            <strong>管理者（admin）</strong>はすべての権限が常に有効です。変更できません。
+          </p>
+        </div>
+
+        <!-- Role tabs -->
+        <div class="px-6 pt-4 bg-gray-50 border-b border-indigo-200 flex gap-1 items-end">
+          <button class="role-tab active" id="perm-tab-admin"       onclick="permSwitchRole('admin')">
+            🔴 管理者
+          </button>
+          <button class="role-tab"        id="perm-tab-mizusumashi" onclick="permSwitchRole('mizusumashi')">
+            🟢 水すまし
+          </button>
+          <button class="role-tab"        id="perm-tab-general"     onclick="permSwitchRole('general')">
+            ⚪ 一般社員
+          </button>
+        </div>
+
+        <!-- Permission matrix table -->
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-gray-50 border-b border-gray-200">
+              <tr>
+                <th class="text-left px-4 py-3 text-gray-500 font-medium w-28">画面ID</th>
+                <th class="text-left px-4 py-3 text-gray-500 font-medium">画面名</th>
+                <th class="text-left px-4 py-3 text-gray-500 font-medium w-24">区分</th>
+                <th class="text-center px-4 py-3 text-gray-500 font-medium w-20">
+                  参照<div class="text-xs font-normal text-gray-400">can_read</div>
+                </th>
+                <th class="text-center px-4 py-3 text-gray-500 font-medium w-20">
+                  登録・更新<div class="text-xs font-normal text-gray-400">can_write</div>
+                </th>
+                <th class="text-center px-4 py-3 text-gray-500 font-medium w-20">
+                  削除<div class="text-xs font-normal text-gray-400">can_delete</div>
+                </th>
+                <th class="text-center px-4 py-3 text-gray-500 font-medium w-28">
+                  Excelエクスポート<div class="text-xs font-normal text-gray-400">can_export</div>
+                </th>
+              </tr>
+            </thead>
+            <tbody id="perm-tbody">
+              <!-- JS rendering -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Bulk operations footer -->
+        <div class="px-6 py-3 border-t border-gray-100 bg-gray-50 flex flex-wrap items-center gap-3">
+          <span class="text-xs text-gray-500">一括操作：</span>
+          <button id="perm-bulk-read"   onclick="permCheckAll('read')"
+            class="text-xs text-indigo-600 hover:underline">参照 全ON</button>
+          <button id="perm-bulk-write"  onclick="permCheckAll('write')"
+            class="text-xs text-indigo-600 hover:underline">登録・更新 全ON</button>
+          <button id="perm-bulk-delete" onclick="permCheckAll('delete')"
+            class="text-xs text-indigo-600 hover:underline">削除 全ON</button>
+          <button id="perm-bulk-export" onclick="permCheckAll('export')"
+            class="text-xs text-indigo-600 hover:underline">エクスポート 全ON</button>
+          <span class="text-gray-300">|</span>
+          <button id="perm-bulk-clear"  onclick="permUncheckAll()"
+            class="text-xs text-red-500 hover:underline">全てOFF</button>
+        </div>
+
+      </div><!-- /screen card -->
+
+      <!-- Legend -->
+      <div class="mt-3 flex flex-wrap gap-6 text-xs text-gray-400 px-1">
+        <span>🔴 管理者 (admin)：全権限・変更不可</span>
+        <span>🟢 水すまし (mizusumashi)：業務操作・マスター参照</span>
+        <span>⚪ 一般社員 (general)：業務入力のみ</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ────────────────────────────────────────────
+       SCREEN: RATE  稼働率・可動率管理（SCR-005）
+       ※ 稼働率可動率_mockup.html コンテンツを統合
+  ──────────────────────────────────────────── -->
+  <div id="screen-rate"
+    class="screen h-full w-full overflow-y-auto bg-gray-100"
+    style="display:none">
+    <main class="px-6 py-5 max-w-5xl mx-auto">
+
+      <!-- パンくずリスト -->
+      <nav class="text-xs text-gray-400 mb-2 flex items-center gap-1">
+        <a href="#" onclick="goToDashboard(); return false;" class="hover:text-gray-600">🏠 ホーム</a>
+        <span>＞</span>
+        <span class="hover:text-gray-600 cursor-pointer" onclick="goToDashboard()">ダッシュボード</span>
+        <span>＞</span>
+        <span class="text-amber-700 font-bold">稼働率・可動率</span>
+      </nav>
+
+      <!-- 画面カード -->
+      <div class="bg-white rounded-2xl shadow-md overflow-hidden">
+
+        <!-- 画面ヘッダー -->
+        <div class="px-6 py-4 flex items-center justify-between bg-amber-800">
+          <div class="flex items-center gap-4">
+            <button onclick="goToDashboard()"
+              class="text-amber-200 hover:text-white text-sm flex items-center gap-1 transition-colors">
+              ← メニューに戻る
+            </button>
+            <div>
+              <h2 class="text-white font-bold text-base">稼働率・可動率管理</h2>
+              <p class="text-amber-200 text-xs mt-0.5">全 <span id="rate-total-count">0</span> 件</p>
+            </div>
+          </div>
+          <div class="flex gap-2">
+            <button onclick="rate_exportToExcel()"
+              class="bg-green-600 text-white text-sm font-bold px-4 py-2 rounded-lg hover:bg-green-700 transition-colors shadow-sm">
+              📥 Excel出力
+            </button>
+            <button onclick="rate_openAddModal()"
+              class="bg-white text-amber-800 text-sm font-bold px-4 py-2 rounded-lg
+                     hover:bg-amber-50 transition-colors shadow-sm">
+              ＋ 新規追加
+            </button>
+          </div>
+        </div>
+
+        <!-- 検索・フィルターバー -->
+        <div class="px-6 py-3 bg-gray-50 border-b border-gray-100 flex gap-3 flex-wrap items-center">
+          <input type="text" id="rate-search-input" placeholder="日付で検索 (例: 2026-03)..."
+            class="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-64
+                   focus:outline-none focus:ring-2 focus:ring-amber-300"
+            onkeyup="rate_filterTable(this.value)">
+          <select id="rate-filter-month" onchange="rate_applyMonthFilter(this.value)"
+            class="border border-gray-300 rounded-lg px-3 py-1.5 text-sm
+                   focus:outline-none focus:ring-2 focus:ring-amber-300">
+            <option value="">全月</option>
+            <option value="2026-03" selected>2026年03月</option>
+            <option value="2026-02">2026年02月</option>
+            <option value="2026-01">2026年01月</option>
+          </select>
+        </div>
+
+        <!-- 一覧テーブル -->
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm" id="rate-table">
+            <thead class="bg-gray-50 border-b border-gray-200">
+              <tr>
+                <th class="text-left px-4 py-3 text-gray-500 font-medium w-16">ID</th>
+                <th class="text-left px-4 py-3 text-gray-500 font-medium">対象日</th>
+                <th class="text-left px-4 py-3 text-gray-500 font-medium">稼働率</th>
+                <th class="text-left px-4 py-3 text-gray-500 font-medium">可動率</th>
+                <th class="text-left px-4 py-3 text-gray-500 font-medium">操作</th>
+              </tr>
+            </thead>
+            <tbody id="rate-tbody"></tbody>
+          </table>
+        </div>
+
+        <!-- 空状態 -->
+        <div id="rate-empty-state" class="hidden py-16 text-center text-gray-400">
+          <div class="text-4xl mb-3">📊</div>
+          <p class="text-sm">データがありません</p>
+          <p class="text-xs mt-1">「＋ 新規追加」から登録してください</p>
+        </div>
+
+        <!-- ページネーション -->
+        <div class="px-6 py-3 border-t border-gray-100 flex items-center justify-between">
+          <span class="text-xs text-gray-400" id="rate-count-label">0 件 / 全 0 件</span>
+          <div class="flex gap-1">
+            <button class="px-3 py-1 border rounded text-xs text-gray-400 hover:bg-gray-50">＜</button>
+            <button class="px-3 py-1 border rounded text-xs bg-amber-700 text-white">1</button>
+            <button class="px-3 py-1 border rounded text-xs text-gray-400 hover:bg-gray-50">＞</button>
+          </div>
+        </div>
+      </div><!-- /画面カード -->
+    </main>
+  </div>
+
+</div><!-- /main area -->
+
+<!-- ================================================================
+     MODALS
+     ================================================================ -->
+
+<!-- ================================================================
+     稼働率・可動率 モーダル群
+     ================================================================ -->
+
+<!-- 稼働率 新規追加・編集モーダル -->
+<div id="rate-modal-overlay" class="modal-overlay hidden" onclick="rate_closeModal(event)">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4" onclick="event.stopPropagation()">
+    <!-- モーダルヘッダー -->
+    <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-amber-800 rounded-t-2xl">
+      <h3 class="text-white font-bold" id="rate-modal-title">稼働率・可動率 新規追加</h3>
+      <button onclick="rate_closeModalBtn()" class="text-amber-200 hover:text-white text-xl transition-colors">✕</button>
+    </div>
+    <!-- フォーム本体 -->
+    <div class="px-6 py-5 space-y-4">
+      <!-- 対象日 -->
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">
+          対象日 <span class="text-red-500">*</span>
+        </label>
+        <input type="date" id="m-record_date"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
+                 focus:outline-none focus:ring-2 focus:ring-amber-300">
+        <p class="text-xs text-gray-400 mt-1">※ 自動機に表示された日付の翌日に入力してください</p>
+      </div>
+      <!-- 稼働率・可動率 -->
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">
+            稼働率 (%) <span class="text-red-500">*</span>
+          </label>
+          <div class="relative">
+            <input type="number" id="m-operation_rate" step="0.01" min="0" max="100"
+              placeholder="例: 85.50"
+              class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm pr-8
+                     focus:outline-none focus:ring-2 focus:ring-amber-300"
+              oninput="rate_updatePreview()">
+            <span class="absolute right-3 top-2 text-gray-400 text-sm">%</span>
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">
+            可動率 (%) <span class="text-red-500">*</span>
+          </label>
+          <div class="relative">
+            <input type="number" id="m-availability_rate" step="0.01" min="0" max="100"
+              placeholder="例: 92.30"
+              class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm pr-8
+                     focus:outline-none focus:ring-2 focus:ring-amber-300"
+              oninput="rate_updatePreview()">
+            <span class="absolute right-3 top-2 text-gray-400 text-sm">%</span>
+          </div>
+        </div>
+      </div>
+      <!-- バリデーションメッセージ -->
+      <div id="rate-validation-msg"
+        class="hidden text-xs text-red-500 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        ⚠️ 稼働率は可動率以下である必要があります（稼働率 ≦ 可動率）
+      </div>
+      <!-- プレビュー -->
+      <div id="rate-preview" class="hidden bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
+        <p class="text-xs text-amber-700 font-medium mb-2">入力プレビュー</p>
+        <div class="flex gap-6 text-sm">
+          <div>
+            <span class="text-gray-500 text-xs">稼働率</span>
+            <div class="font-bold text-amber-800" id="rate-preview-op">—</div>
+          </div>
+          <div>
+            <span class="text-gray-500 text-xs">可動率</span>
+            <div class="font-bold text-amber-800" id="rate-preview-av">—</div>
+          </div>
+          <div>
+            <span class="text-gray-500 text-xs">差（可動率 - 稼働率）</span>
+            <div class="font-bold text-gray-700" id="rate-preview-diff">—</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- フォームフッター -->
+    <div class="px-6 py-4 bg-gray-50 rounded-b-2xl flex gap-3 justify-end border-t border-gray-100">
+      <button onclick="rate_closeModalBtn()"
+        class="px-4 py-2 text-sm text-gray-600 hover:bg-gray-200 rounded-lg transition-colors">
+        キャンセル
+      </button>
+      <button onclick="rate_saveModal()"
+        class="px-6 py-2 text-sm font-bold bg-amber-700 text-white rounded-lg hover:bg-amber-800 transition-colors">
+        保存
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- 稼働率 削除確認モーダル -->
+<div id="rate-delete-overlay" class="modal-overlay hidden">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6">
+    <div class="text-center">
+      <div class="text-4xl mb-3">🗑️</div>
+      <h3 class="text-lg font-bold text-gray-800 mb-1">このデータを削除しますか？</h3>
+      <p class="text-sm text-gray-500 mb-1">
+        「<span id="rate-delete-name" class="font-medium text-gray-700"></span>」を無効化します。
+      </p>
+      <p class="text-xs text-gray-400 mb-5">
+        データは論理削除（is_active = false）されます。物理削除は行いません。
+      </p>
+      <div class="flex gap-3 justify-center">
+        <button onclick="rate_closeDelete()"
+          class="px-5 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
+          キャンセル
+        </button>
+        <button onclick="rate_confirmDelete()"
+          class="px-5 py-2 text-sm font-bold bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors">
+          削除する
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- NFC Simulation Modal -->
+<div id="nfc-modal" class="modal-overlay hidden"
+  onclick="if(event.target===this) closeNfcModal()">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6"
+    onclick="event.stopPropagation()">
+    <div class="flex items-center justify-between mb-5">
+      <div>
+        <h3 class="font-bold text-gray-800 text-lg">NFCカードシミュレーション</h3>
+        <p class="text-sm text-gray-500 mt-0.5">かざすカードを選択してください</p>
+      </div>
+      <button onclick="closeNfcModal()"
+        class="text-gray-400 hover:text-gray-600 text-xl w-8 h-8 flex items-center justify-center
+               rounded-lg hover:bg-gray-100 transition-colors">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+    <div class="space-y-3">
+      <!-- Admin -->
+      <div class="nfc-card flex items-center gap-4 p-4 rounded-xl bg-gray-800 text-white"
+           onclick="handleNFC('admin')">
+        <div class="w-11 h-11 bg-white bg-opacity-15 rounded-lg flex items-center justify-center flex-shrink-0">
+          <i class="fa-solid fa-user-shield"></i>
+        </div>
+        <div class="flex-1">
+          <p class="font-bold text-sm">管理者カード</p>
+          <p class="text-gray-300 text-xs">管理者 太郎 / EMP-00001</p>
+        </div>
+        <i class="fa-solid fa-wifi rotate-90 text-gray-400"></i>
+      </div>
+      <!-- Mizusumashi -->
+      <div class="nfc-card flex items-center gap-4 p-4 rounded-xl bg-primary text-white"
+           onclick="handleNFC('mizusumashi')">
+        <div class="w-11 h-11 bg-white bg-opacity-15 rounded-lg flex items-center justify-center flex-shrink-0">
+          <i class="fa-solid fa-person-digging"></i>
+        </div>
+        <div class="flex-1">
+          <p class="font-bold text-sm">水すましカード</p>
+          <p class="text-blue-200 text-xs">水澄 花子 / EMP-00002</p>
+        </div>
+        <i class="fa-solid fa-wifi rotate-90 text-blue-200"></i>
+      </div>
+      <!-- General -->
+      <div class="nfc-card flex items-center gap-4 p-4 rounded-xl bg-green-600 text-white"
+           onclick="handleNFC('general')">
+        <div class="w-11 h-11 bg-white bg-opacity-15 rounded-lg flex items-center justify-center flex-shrink-0">
+          <i class="fa-solid fa-user"></i>
+        </div>
+        <div class="flex-1">
+          <p class="font-bold text-sm">一般社員カード</p>
+          <p class="text-green-200 text-xs">作業 健太 / EMP-00003</p>
+        </div>
+        <i class="fa-solid fa-wifi rotate-90 text-green-200"></i>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Logout Confirm Modal -->
+<div id="logout-modal" class="modal-overlay hidden"
+  onclick="if(event.target===this) closeLogoutModal()">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6"
+    onclick="event.stopPropagation()">
+    <div class="text-center">
+      <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+        <i class="fa-solid fa-right-from-bracket text-gray-500 text-xl"></i>
+      </div>
+      <h3 class="text-lg font-bold text-gray-800 mb-1">ログアウトしますか？</h3>
+      <p class="text-sm text-gray-500 mb-6">セッションを終了してログイン画面に戻ります。</p>
+      <div class="flex gap-3 justify-center">
+        <button onclick="closeLogoutModal()"
+          class="px-5 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
+          キャンセル
+        </button>
+        <button onclick="confirmLogout()"
+          class="px-5 py-2 text-sm font-bold bg-primary text-white rounded-lg hover:bg-blue-700 transition-colors">
+          ログアウト
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Permission Save Confirm Modal -->
+<div id="perm-save-overlay" class="modal-overlay hidden">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6">
+    <div class="text-center">
+      <div class="text-4xl mb-3">💾</div>
+      <h3 class="text-lg font-bold text-gray-800 mb-1">権限を保存しますか？</h3>
+      <p class="text-sm text-gray-500 mb-1" id="perm-save-role-label">
+        「<span class="font-medium text-indigo-700"></span>」の権限設定を更新します。
+      </p>
+      <p class="text-xs text-gray-400 mb-5">
+        変更した権限設定は<strong>次回ログイン時から</strong>適用されます。
+      </p>
+      <div class="flex gap-3 justify-center">
+        <button onclick="permCloseSaveConfirm()"
+          class="px-5 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
+          キャンセル
+        </button>
+        <button onclick="permConfirmSave()"
+          class="px-5 py-2 text-sm font-bold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
+          保存する
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" style="opacity:0;"></div>
+
+<!-- ================================================================
+     JAVASCRIPT
+     ================================================================ -->
+<script>
+// ============================================================
+//  MOCK AUTH DATA
+// ============================================================
+
+const MOCK_USERS = {
+  'EMP-00001': { password: 'admin1234',   role: 'admin',       name: '管理者 太郎' },
+  'EMP-00002': { password: 'water1234',   role: 'mizusumashi', name: '水澄 花子'   },
+  'EMP-00003': { password: 'general1234', role: 'general',     name: '作業 健太'   },
+};
+
+const USER_INFO = {
+  admin:       { name: '管理者 太郎', label: '管理者',  badgeCls: 'text-xs bg-gray-800   text-white px-2 py-0.5 rounded inline-block' },
+  mizusumashi: { name: '水澄 花子',  label: '水すまし', badgeCls: 'text-xs bg-blue-600   text-white px-2 py-0.5 rounded inline-block' },
+  general:     { name: '作業 健太',  label: '一般社員', badgeCls: 'text-xs bg-green-600  text-white px-2 py-0.5 rounded inline-block' },
+};
+
+// ============================================================
+//  MENU ACCESS CONTROL  （要件定義書 §4.3.1 準拠）
+// ============================================================
+
+const MENU_ITEMS = [
+  { id: 'menu-recorder',          roles: ['admin', 'mizusumashi', 'general'] },
+  { id: 'menu-labor-check',       roles: ['admin', 'mizusumashi'] },
+  { id: 'menu-production',        roles: ['admin', 'mizusumashi'] },
+  { id: 'menu-labor-input',       roles: ['admin', 'mizusumashi'] },
+  { id: 'menu-operation-rate',    roles: ['admin', 'mizusumashi'] },
+  { id: 'menu-report-production', roles: ['admin'] },
+  { id: 'menu-report-defect',     roles: ['admin'] },
+  { id: 'menu-excel-export',      roles: ['admin'] },
+  { id: 'menu-master',            roles: ['admin'] },
+  { id: 'menu-permission-master', roles: ['admin'] },  // 管理者のみ
+];
+
+// ============================================================
+//  APP STATE
+// ============================================================
+
+let currentUserRole = '';   // 'admin' | 'mizusumashi' | 'general'
+
+// ============================================================
+//  SCREEN NAVIGATION
+// ============================================================
+
+// flex が必要な画面（縦横中央揃えレイアウト）
+const SCREEN_DISPLAY_TYPE = {
+  'screen-loading':    'flex',
+  'screen-login':      'flex',
+  'screen-dashboard':  'block',
+  'screen-permission': 'block',
+  'screen-rate':       'block',
+};
+
+function navigateTo(screenId) {
+  document.querySelectorAll('.screen').forEach(el => {
+    el.classList.remove('active');
+    el.style.display = 'none';
+  });
+  const next = document.getElementById(screenId);
+  if (next) {
+    next.style.display = SCREEN_DISPLAY_TYPE[screenId] || 'block';
+    setTimeout(() => next.classList.add('active'), 10);
+  }
+}
+
+function goToDashboard() {
+  updateMenuVisibility();
+  navigateTo('screen-dashboard');
+}
+
+function openPermissionScreen() {
+  // 権限設定マスターを開く前にタブを管理者ロールにリセット
+  permSwitchRole('admin');
+  navigateTo('screen-permission');
+}
+
+function openRateScreen() {
+  // 稼働率・可動率画面を開く（初期描画）
+  rate_renderTable();
+  navigateTo('screen-rate');
+}
+
+// ============================================================
+//  LOGIN FORM CONTROLS
+// ============================================================
+
+let formOpen = false;
+let passwordVisible = false;
+
+function toggleForm() {
+  formOpen = !formOpen;
+  document.getElementById('loginForm').classList.toggle('open', formOpen);
+  document.getElementById('toggleIcon').style.transform =
+    formOpen ? 'rotate(180deg)' : 'rotate(0deg)';
+}
+
+function togglePassword() {
+  passwordVisible = !passwordVisible;
+  document.getElementById('password').type = passwordVisible ? 'text' : 'password';
+  document.getElementById('eyeIcon').className =
+    passwordVisible ? 'fa-solid fa-eye-slash text-sm' : 'fa-solid fa-eye text-sm';
+}
+
+function showLoginError(msg) {
+  document.getElementById('login-error-text').textContent = msg;
+  document.getElementById('login-error').classList.remove('hidden');
+}
+
+function hideLoginError() {
+  document.getElementById('login-error').classList.add('hidden');
+}
+
+// ============================================================
+//  LOGIN  （要件定義書 §4.1 準拠）
+// ============================================================
+
+/** 社員番号＋パスワード認証 */
+async function handleIdPwLogin() {
+  const id = document.getElementById('employeeId').value.trim();
+  const pw = document.getElementById('password').value;
+
+  if (!id) { showLoginError('社員番号を入力してください'); return; }
+  if (!pw) { showLoginError('パスワードを入力してください'); return; }
+  hideLoginError();
+
+  try {
+    const res  = await fetch('/auth', {
+      method : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body   : JSON.stringify({ employee_id: id, password: pw }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showLoginError(data.message || '認証に失敗しました');
+      return;
+    }
+    processNfcLogin(data.role, data.name, data.employee_id);
+  } catch (e) {
+    showLoginError('サーバーに接続できません');
+  }
+}
+
+/** デモ用ロールボタン */
+function login(role) {
+  hideLoginError();
+  processLogin(role);
+}
+
+/** NFC シミュレーション */
+function handleNFC(role) {
+  closeNfcModal();
+  processLogin(role);
+}
+
+/**
+ * 共通ログイン処理フロー
+ * 1. ローディング表示 (800ms)
+ * 2. 権限取得フェーズ (400ms)
+ * 3. ダッシュボード表示
+ */
+function processLogin(role) {
+  navigateTo('screen-loading');
+  document.getElementById('loading-text').textContent = '認証処理中...';
+  document.getElementById('loading-sub').textContent  = 'ユーザー情報を確認しています';
+
+  setTimeout(() => {
+    document.getElementById('loading-text').textContent = '権限情報を取得中...';
+    document.getElementById('loading-sub').textContent  = 'アクセス可能なメニューを確認しています';
+
+    setTimeout(() => {
+      currentUserRole = role;
+      const info = USER_INFO[role];
+
+      // グローバルヘッダーにユーザー情報を反映
+      document.getElementById('global-header').classList.remove('hidden');
+      document.getElementById('header-user-name').textContent = info.name;
+      const roleEl = document.getElementById('header-role-name');
+      roleEl.textContent = info.label;
+      roleEl.className   = info.badgeCls;
+
+      // ダッシュボードのメニューを権限に応じて表示/非表示
+      updateMenuVisibility();
+      navigateTo('screen-dashboard');
+      showToast(`✅ ログインしました：${info.name}`);
+    }, 400);
+  }, 800);
+}
+
+/** メニュー表示制御（許可されていないメニューは非表示） */
+function updateMenuVisibility() {
+  MENU_ITEMS.forEach(({ id, roles }) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = roles.includes(currentUserRole) ? '' : 'none';
+  });
+}
+
+// ============================================================
+//  LOGOUT
+// ============================================================
+
+function openLogoutModal()  { document.getElementById('logout-modal').classList.remove('hidden'); }
+function closeLogoutModal() { document.getElementById('logout-modal').classList.add('hidden'); }
+
+function confirmLogout() {
+  closeLogoutModal();
+  currentUserRole = '';
+  document.getElementById('global-header').classList.add('hidden');
+  document.getElementById('employeeId').value = '';
+  document.getElementById('password').value   = '';
+  hideLoginError();
+  showToast('ログアウトしました');
+  setTimeout(() => navigateTo('screen-login'), 300);
+}
+
+// ============================================================
+//  MIFARE リーダー  – WebSocket接続管理
+//  Pythonで実装されたローカルMIFAREリーダーサービス（ws://127.0.0.1:8765）と通信する
+//  DB照合・ログ記録は AWS 上の API サーバー（aws_api.py）が担当する
+// ============================================================
+
+const NFC_WS_URL        = 'ws://127.0.0.1:8765';
+const NFC_RECONNECT_MS  = 3000;   // 再接続間隔
+let   _nfcWs            = null;
+let   _nfcReconnTimer   = null;
+let   _nfcBridgeReady   = false;
+
+/** MIFAREリーダーサービス接続状態をUIに反映 */
+function nfc_setStatus(state, label) {
+  const badge = document.getElementById('nfc-bridge-status');
+  const dot   = document.getElementById('nfc-status-dot');
+  const text  = document.getElementById('nfc-status-text');
+  const area  = document.getElementById('nfc-touch-area');
+  const sub   = document.getElementById('nfc-area-sub');
+
+  badge.className = `nfc-bridge-status ${state}`;
+  dot.className   = `status-dot ${state}`;
+  text.textContent = label;
+
+  area.classList.remove('bridge-ready', 'bridge-error', 'card-reading');
+  if (state === 'connected') {
+    area.classList.add('bridge-ready');
+    if (sub) sub.textContent = 'MIFAREカードをリーダーにかざしてください';
+  } else if (state === 'error') {
+    area.classList.add('bridge-error');
+    if (sub) sub.textContent = 'MIFAREリーダーサービスに接続できません（mifare_reader.py を起動してください）';
+  } else {
+    if (sub) sub.textContent = 'MIFAREリーダーサービスに接続中...';
+  }
+}
+
+/** カード読み取り中UIへ切り替え */
+function nfc_setCardReading(cardId) {
+  const area  = document.getElementById('nfc-touch-area');
+  const label = document.getElementById('nfc-area-label');
+  const sub   = document.getElementById('nfc-area-sub');
+  const icon  = document.getElementById('nfc-area-icon');
+  area.classList.remove('bridge-ready', 'bridge-error');
+  area.classList.add('card-reading');
+  label.textContent = 'カードを認証中...';
+  sub.textContent   = `カードID: ${cardId}`;
+  icon.className    = 'fa-solid fa-circle-notch fa-spin text-4xl text-blue-500';
+}
+
+/** カード読み取り後にUIを元に戻す */
+function nfc_resetCardArea() {
+  const area  = document.getElementById('nfc-touch-area');
+  const label = document.getElementById('nfc-area-label');
+  const icon  = document.getElementById('nfc-area-icon');
+  area.classList.remove('card-reading');
+  if (_nfcBridgeReady) {
+    area.classList.add('bridge-ready');
+    label.textContent = 'ここにカードをかざしてください';
+    icon.className    = 'fa-solid fa-wifi text-4xl text-green-500 rotate-90';
+    document.getElementById('nfc-area-sub').textContent = 'MIFAREカードをリーダーにかざしてください';
+  } else {
+    label.textContent = 'ここにカードをかざしてください';
+    icon.className    = 'fa-solid fa-wifi text-4xl text-gray-400 rotate-90';
+  }
+}
+
+/** WebSocket接続を開始（自動再接続付き） */
+function nfc_connect() {
+  if (_nfcWs && (_nfcWs.readyState === WebSocket.OPEN || _nfcWs.readyState === WebSocket.CONNECTING)) return;
+
+  nfc_setStatus('connecting', 'MIFAREリーダーサービスに接続中...');
+
+  try {
+    _nfcWs = new WebSocket(NFC_WS_URL);
+  } catch (e) {
+    nfc_scheduleReconnect();
+    return;
+  }
+
+  _nfcWs.onopen = () => {
+    _nfcBridgeReady = true;
+    nfc_setStatus('connected', 'MIFAREリーダー接続済み');
+    if (_nfcReconnTimer) { clearTimeout(_nfcReconnTimer); _nfcReconnTimer = null; }
+  };
+
+  _nfcWs.onmessage = (evt) => {
+    let msg;
+    try { msg = JSON.parse(evt.data); } catch { return; }
+    nfc_handleMessage(msg);
+  };
+
+  _nfcWs.onclose = () => {
+    _nfcBridgeReady = false;
+    nfc_setStatus('disconnected', 'MIFAREリーダー未接続');
+    nfc_scheduleReconnect();
+  };
+
+  _nfcWs.onerror = () => {
+    _nfcBridgeReady = false;
+    nfc_setStatus('error', 'MIFAREリーダーサービスに接続できません');
+  };
+}
+
+function nfc_scheduleReconnect() {
+  if (_nfcReconnTimer) return;
+  _nfcReconnTimer = setTimeout(() => {
+    _nfcReconnTimer = null;
+    nfc_connect();
+  }, NFC_RECONNECT_MS);
+}
+
+/** MIFAREリーダーサービスからのメッセージを処理 */
+function nfc_handleMessage(msg) {
+  switch (msg.type) {
+
+    case 'CONNECTED':
+      // サーバー側の初期メッセージ（無視してよい）
+      break;
+
+    case 'READER_CONNECTED':
+      showToast(`🔌 MIFAREリーダー接続: ${msg.readerName}`);
+      break;
+
+    case 'READER_DISCONNECTED':
+      showToast(`⚠️ MIFAREリーダーが切断されました`);
+      break;
+
+    case 'CARD_DETECTED':
+      // カード検出直後（認証前）: UIをローディングに切り替え
+      hideLoginError();
+      nfc_setCardReading(msg.cardId);
+      break;
+
+    case 'AUTH_SUCCESS':
+      // 認証成功: ダッシュボードへ遷移
+      nfc_resetCardArea();
+      processNfcLogin(msg.role, msg.name, msg.employeeId);
+      break;
+
+    case 'AUTH_FAILED':
+      // 認証失敗
+      nfc_resetCardArea();
+      showLoginError(
+        msg.error === 'Card not registered' ? 'このカードは登録されていません' :
+        msg.error === 'Account inactive'    ? 'このカードは無効化されています' :
+        msg.error === 'API timeout'         ? '認証サーバーへの接続がタイムアウトしました' :
+        msg.error === 'API connection error'? '認証サーバーに接続できません' :
+        `認証に失敗しました（${msg.error || '不明なエラー'}）`
+      );
+      break;
+  }
+}
+
+/** NFCログイン成功後の処理 */
+function processNfcLogin(role, name, employeeId) {
+  // USER_INFO にない場合はサーバー返却値で補完
+  if (name && !USER_INFO[role]) {
+    USER_INFO[role] = {
+      name    : name,
+      label   : role,
+      badgeCls: 'text-xs bg-blue-600 text-white px-2 py-0.5 rounded inline-block',
+    };
+  }
+  if (name) USER_INFO[role] = { ...USER_INFO[role], name };
+  processLogin(role);
+}
+
+/** ページロード時にMIFAREリーダーサービスへの接続を開始 */
+window.addEventListener('load', () => nfc_connect());
+
+// ============================================================
+//  NFC MODAL  （デモ用シミュレーション）
+// ============================================================
+
+function openNfcModal() {
+  // MIFAREリーダーサービス接続済みの場合はシミュレーションモーダルを開かない
+  if (_nfcBridgeReady) {
+    showToast('📡 MIFAREリーダーが接続済みです。カードをかざしてください');
+    return;
+  }
+  document.getElementById('nfc-modal').classList.remove('hidden');
+}
+function closeNfcModal() { document.getElementById('nfc-modal').classList.add('hidden'); }
+
+// ============================================================
+//  TOAST
+// ============================================================
+
+let _toastTimer = null;
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent   = msg;
+  t.style.opacity = '1';
+  if (_toastTimer) clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => { t.style.opacity = '0'; }, 3000);
+}
+
+// ============================================================
+//  PERMISSION SETTINGS  （権限設定_モックアップ.html から統合）
+//  変数・関数名は perm_ プレフィックスで他との衝突を防ぐ
+// ============================================================
+
+/** 画面定義（権限設定_モックアップ.html の screens と同一） */
+const PERM_SCREENS = [
+  { code: 'SCR-001',    name: 'ログイン',               category: '認証',      hasExport: false },
+  { code: 'SCR-002',    name: 'ホーム（ダッシュボード）', category: 'メイン',   hasExport: false },
+  { code: 'SCR-003',    name: '工数入力',                category: '業務',      hasExport: false },
+  { code: 'SCR-004',    name: '製造個数入力',             category: '業務',      hasExport: false },
+  { code: 'SCR-005',    name: '稼働率入力',               category: '業務',      hasExport: false },
+  { code: 'SCR-010',    name: 'マスター管理',             category: 'マスター',  hasExport: false },
+  { code: 'SCR-010-09', name: '製品単価履歴',             category: 'マスター',  hasExport: false },
+  { code: 'SCR-011',    name: '作業レコーダー',           category: '業務',      hasExport: false },
+  { code: 'SCR-012',    name: '工数確認・修正',           category: '業務',      hasExport: false },
+  { code: 'SCR-013',    name: '製造レポート',             category: 'レポート',  hasExport: true  },
+  { code: 'SCR-014',    name: '不良レポート',             category: 'レポート',  hasExport: true  },
+  { code: 'SCR-015',    name: 'Excelエクスポート',        category: 'レポート',  hasExport: true  },
+];
+
+const PERM_CATEGORY_COLORS = {
+  '認証':     'bg-gray-100   text-gray-500',
+  'メイン':   'bg-blue-100   text-blue-700',
+  '業務':     'bg-green-100  text-green-700',
+  'マスター': 'bg-purple-100 text-purple-700',
+  'レポート': 'bg-orange-100 text-orange-700',
+};
+
+/** 権限初期データ（権限設定_モックアップ.html の permissions と同一） */
+const PERM_DATA = {
+  admin: {
+    'SCR-001':    { read: true,  write: false, delete: false, export: false },
+    'SCR-002':    { read: true,  write: false, delete: false, export: false },
+    'SCR-003':    { read: true,  write: true,  delete: true,  export: false },
+    'SCR-004':    { read: true,  write: true,  delete: true,  export: false },
+    'SCR-005':    { read: true,  write: true,  delete: true,  export: false },
+    'SCR-010':    { read: true,  write: true,  delete: true,  export: false },
+    'SCR-010-09': { read: true,  write: true,  delete: true,  export: false },
+    'SCR-011':    { read: true,  write: true,  delete: true,  export: false },
+    'SCR-012':    { read: true,  write: true,  delete: true,  export: false },
+    'SCR-013':    { read: true,  write: false, delete: false, export: true  },
+    'SCR-014':    { read: true,  write: false, delete: false, export: true  },
+    'SCR-015':    { read: true,  write: false, delete: false, export: true  },
+  },
+  mizusumashi: {
+    'SCR-001':    { read: true,  write: false, delete: false, export: false },
+    'SCR-002':    { read: true,  write: false, delete: false, export: false },
+    'SCR-003':    { read: true,  write: true,  delete: false, export: false },
+    'SCR-004':    { read: true,  write: true,  delete: false, export: false },
+    'SCR-005':    { read: true,  write: true,  delete: false, export: false },
+    'SCR-010':    { read: true,  write: false, delete: false, export: false },
+    'SCR-010-09': { read: true,  write: false, delete: false, export: false },
+    'SCR-011':    { read: true,  write: true,  delete: false, export: false },
+    'SCR-012':    { read: true,  write: true,  delete: true,  export: false },
+    'SCR-013':    { read: true,  write: false, delete: false, export: true  },
+    'SCR-014':    { read: true,  write: false, delete: false, export: true  },
+    'SCR-015':    { read: true,  write: false, delete: false, export: true  },
+  },
+  general: {
+    'SCR-001':    { read: true,  write: false, delete: false, export: false },
+    'SCR-002':    { read: true,  write: false, delete: false, export: false },
+    'SCR-003':    { read: true,  write: true,  delete: false, export: false },
+    'SCR-004':    { read: true,  write: true,  delete: false, export: false },
+    'SCR-005':    { read: false, write: false, delete: false, export: false },
+    'SCR-010':    { read: false, write: false, delete: false, export: false },
+    'SCR-010-09': { read: false, write: false, delete: false, export: false },
+    'SCR-011':    { read: true,  write: true,  delete: false, export: false },
+    'SCR-012':    { read: false, write: false, delete: false, export: false },
+    'SCR-013':    { read: false, write: false, delete: false, export: false },
+    'SCR-014':    { read: false, write: false, delete: false, export: false },
+    'SCR-015':    { read: false, write: false, delete: false, export: false },
+  },
+};
+
+const PERM_ROLE_LABELS = {
+  admin:       '管理者 (admin)',
+  mizusumashi: '水すまし (mizusumashi)',
+  general:     '一般社員 (general)',
+};
+
+let permSavedSnapshot = JSON.stringify(PERM_DATA);
+let permCurrentRole   = 'admin';
+let permHasChanges    = false;
+
+function permSwitchRole(role) {
+  permCurrentRole = role;
+  ['admin', 'mizusumashi', 'general'].forEach(r => {
+    document.getElementById(`perm-tab-${r}`).classList.toggle('active', r === role);
+  });
+  permRenderTable();
+  permUpdateBulkButtons();
+}
+
+function permRenderTable() {
+  const tbody   = document.getElementById('perm-tbody');
+  const isAdmin = (permCurrentRole === 'admin');
+
+  tbody.innerHTML = PERM_SCREENS.map(s => {
+    const p      = PERM_DATA[permCurrentRole][s.code];
+    const catCls = PERM_CATEGORY_COLORS[s.category] || 'bg-gray-100 text-gray-500';
+    const locked = isAdmin;
+    const dis    = locked ? 'disabled' : '';
+
+    const chk = (field) =>
+      `<input type="checkbox" class="perm-checkbox"
+         id="chk-${s.code}-${field}"
+         ${p[field] ? 'checked' : ''} ${dis}
+         onchange="permOnPermChange('${s.code}', '${field}', this.checked)">`;
+
+    return `
+      <tr class="perm-row border-b border-gray-100 transition-colors${locked ? ' locked' : ''}"
+          id="prow-${s.code}">
+        <td class="px-4 py-3 text-xs font-mono text-gray-500">${s.code}</td>
+        <td class="px-4 py-3 font-medium text-gray-800">${s.name}</td>
+        <td class="px-4 py-3">
+          <span class="inline-block text-xs px-2 py-0.5 rounded-full font-medium ${catCls}">
+            ${s.category}
+          </span>
+        </td>
+        <td class="px-4 py-3 text-center">${chk('read')}</td>
+        <td class="px-4 py-3 text-center">${chk('write')}</td>
+        <td class="px-4 py-3 text-center">${chk('delete')}</td>
+        <td class="px-4 py-3 text-center">
+          ${s.hasExport ? chk('export') : '<span class="text-gray-300 text-xs">—</span>'}
+        </td>
+      </tr>`;
+  }).join('');
+}
+
+function permOnPermChange(code, type, checked) {
+  PERM_DATA[permCurrentRole][code][type] = checked;
+
+  // 参照OFF → 他の権限も連動してOFF（要件 §4.4.4 矛盾チェック）
+  if (type === 'read' && !checked) {
+    ['write', 'delete', 'export'].forEach(t => {
+      PERM_DATA[permCurrentRole][code][t] = false;
+      const el = document.getElementById(`chk-${code}-${t}`);
+      if (el) el.checked = false;
+    });
+  }
+  // Update/Delete ON → 参照も連動してON
+  if ((type === 'write' || type === 'delete') && checked) {
+    PERM_DATA[permCurrentRole][code].read = true;
+    const readEl = document.getElementById(`chk-${code}-read`);
+    if (readEl) readEl.checked = true;
+  }
+
+  const row = document.getElementById(`prow-${code}`);
+  if (row) row.classList.add('changed');
+  permCheckUnsaved();
+}
+
+function permCheckUnsaved() {
+  permHasChanges = (JSON.stringify(PERM_DATA) !== permSavedSnapshot);
+  document.getElementById('perm-change-badge').classList.toggle('hidden', !permHasChanges);
+  const btn = document.getElementById('perm-save-btn');
+  btn.disabled = !permHasChanges;
+  btn.classList.toggle('opacity-50',         !permHasChanges);
+  btn.classList.toggle('cursor-not-allowed',  !permHasChanges);
+}
+
+function permCheckAll(type) {
+  if (permCurrentRole === 'admin') return;
+  PERM_SCREENS.forEach(s => {
+    if (type === 'export' && !s.hasExport) return;
+    PERM_DATA[permCurrentRole][s.code][type] = true;
+    if (type !== 'read') PERM_DATA[permCurrentRole][s.code].read = true;
+  });
+  permRenderTable();
+  permCheckUnsaved();
+  PERM_SCREENS.forEach(s => {
+    const row = document.getElementById(`prow-${s.code}`);
+    if (row) row.classList.add('changed');
+  });
+}
+
+function permUncheckAll() {
+  if (permCurrentRole === 'admin') return;
+  PERM_SCREENS.forEach(s => {
+    PERM_DATA[permCurrentRole][s.code] = { read: false, write: false, delete: false, export: false };
+  });
+  permRenderTable();
+  permCheckUnsaved();
+  PERM_SCREENS.forEach(s => {
+    const row = document.getElementById(`prow-${s.code}`);
+    if (row) row.classList.add('changed');
+  });
+}
+
+function permUpdateBulkButtons() {
+  const locked = (permCurrentRole === 'admin');
+  ['perm-bulk-read', 'perm-bulk-write', 'perm-bulk-delete', 'perm-bulk-export', 'perm-bulk-clear']
+    .forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.disabled = locked;
+      el.classList.toggle('opacity-40',         locked);
+      el.classList.toggle('cursor-not-allowed', locked);
+      el.classList.toggle('pointer-events-none', locked);
+    });
+}
+
+function permOpenSaveConfirm() {
+  if (!permHasChanges) return;
+  document.querySelector('#perm-save-role-label span').textContent =
+    PERM_ROLE_LABELS[permCurrentRole];
+  document.getElementById('perm-save-overlay').classList.remove('hidden');
+}
+
+function permCloseSaveConfirm() {
+  document.getElementById('perm-save-overlay').classList.add('hidden');
+}
+
+function permConfirmSave() {
+  permSavedSnapshot = JSON.stringify(PERM_DATA);
+  permHasChanges    = false;
+  document.getElementById('perm-change-badge').classList.add('hidden');
+  const btn = document.getElementById('perm-save-btn');
+  btn.disabled = true;
+  btn.classList.add('opacity-50', 'cursor-not-allowed');
+  PERM_SCREENS.forEach(s => {
+    const row = document.getElementById(`prow-${s.code}`);
+    if (row) row.classList.remove('changed');
+  });
+  permCloseSaveConfirm();
+  showToast(`✅ ${PERM_ROLE_LABELS[permCurrentRole]} の権限を保存しました`);
+}
+
+// ============================================================
+//  RATE SCREEN（稼働率・可動率管理）SCR-005
+//  変数・関数名は rate_ プレフィックスで他との衝突を防ぐ
+// ============================================================
+
+/** モックデータ（要件定義書 §4.1 / API仕様書 §9 使用例に準拠） */
+let RATE_DATA = [
+  { id:1,  record_date:'2026-03-08', operation_rate:88.50, availability_rate:93.20, active:true },
+  { id:2,  record_date:'2026-03-07', operation_rate:91.00, availability_rate:95.50, active:true },
+  { id:3,  record_date:'2026-03-06', operation_rate:76.30, availability_rate:82.10, active:true },
+  { id:4,  record_date:'2026-03-05', operation_rate:94.20, availability_rate:97.80, active:true },
+  { id:5,  record_date:'2026-03-04', operation_rate:68.40, availability_rate:75.00, active:true },
+  { id:6,  record_date:'2026-03-03', operation_rate:85.00, availability_rate:89.60, active:true },
+  { id:7,  record_date:'2026-03-01', operation_rate:90.10, availability_rate:94.40, active:true },
+  { id:8,  record_date:'2026-02-28', operation_rate:79.80, availability_rate:84.20, active:true },
+  { id:9,  record_date:'2026-02-27', operation_rate:92.50, availability_rate:96.00, active:true },
+  { id:10, record_date:'2026-02-26', operation_rate:83.70, availability_rate:88.50, active:true },
+  { id:11, record_date:'2026-02-25', operation_rate:71.20, availability_rate:78.90, active:true },
+  { id:12, record_date:'2026-02-24', operation_rate:96.30, availability_rate:98.10, active:true },
+];
+
+let rate_editingId  = null;
+let rate_deletingId = null;
+let rate_searchVal  = '';
+let rate_filterMonth = '2026-03';
+
+/** ゲージバーの色（要件定義書 §4.1 閾値） */
+function rate_barColor(val, type) {
+  if (type === 'op') return val >= 90 ? '#22c55e' : val >= 70 ? '#f59e0b' : '#ef4444';
+  return val >= 90 ? '#10b981' : val >= 70 ? '#d97706' : '#dc2626';
+}
+
+function rate_rateBar(val, type) {
+  const fill = rate_barColor(val, type);
+  return `<span class="gauge-bar-bg"><span class="gauge-bar-fill" style="width:${Math.min(100,val)}%;background:${fill}"></span></span>`;
+}
+
+function rate_formatDate(d) {
+  const [y, m, day] = d.split('-');
+  return `${y}/${m}/${day}`;
+}
+
+/** テーブル描画（要件定義書 §4.1 一覧表示） */
+function rate_renderTable(highlightId) {
+  const tbody = document.getElementById('rate-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  const visible = RATE_DATA.filter(r => {
+    if (!r.active) return false;
+    if (rate_filterMonth && !r.record_date.startsWith(rate_filterMonth)) return false;
+    if (rate_searchVal && !r.record_date.includes(rate_searchVal)) return false;
+    return true;
+  });
+
+  const activeTotal = RATE_DATA.filter(r => r.active).length;
+  document.getElementById('rate-total-count').textContent = activeTotal;
+  document.getElementById('rate-count-label').textContent = `1 - ${visible.length} 件 / 全 ${visible.length} 件`;
+  document.getElementById('rate-empty-state').classList.toggle('hidden', visible.length > 0);
+
+  visible.forEach(r => {
+    const tr = document.createElement('tr');
+    tr.id = `rate-row-${r.id}`;
+    tr.className = 'border-b border-gray-100 hover:bg-gray-50 transition-colors'
+      + (r.id === highlightId ? ' rate-highlight' : '');
+
+    tr.innerHTML = `
+      <td class="px-4 py-3 text-gray-400 text-xs font-mono">${r.id}</td>
+      <td class="px-4 py-3 font-medium text-gray-900">${rate_formatDate(r.record_date)}</td>
+      <td class="px-4 py-3">
+        <div class="flex items-center gap-2">
+          <span class="font-semibold text-gray-800 w-14 text-right">${r.operation_rate.toFixed(2)}%</span>
+          ${rate_rateBar(r.operation_rate, 'op')}
+        </div>
+      </td>
+      <td class="px-4 py-3">
+        <div class="flex items-center gap-2">
+          <span class="font-semibold text-gray-800 w-14 text-right">${r.availability_rate.toFixed(2)}%</span>
+          ${rate_rateBar(r.availability_rate, 'av')}
+        </div>
+      </td>
+      <td class="px-4 py-3">
+        <div class="flex gap-2">
+          <button onclick="rate_openEditModal(${r.id})"
+            class="px-3 py-1.5 text-xs font-medium bg-amber-50 text-amber-700
+                   border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors">
+            ✏️ 編集
+          </button>
+          <button onclick="rate_openDeleteModal(${r.id})"
+            class="px-3 py-1.5 text-xs font-medium bg-red-50 text-red-600
+                   border border-red-200 rounded-lg hover:bg-red-100 transition-colors">
+            🗑️ 削除
+          </button>
+        </div>
+      </td>`;
+    tbody.appendChild(tr);
+  });
+
+  if (highlightId) {
+    setTimeout(() => {
+      const el = document.getElementById(`rate-row-${highlightId}`);
+      if (el) el.classList.remove('rate-highlight');
+    }, 2000);
+  }
+}
+
+/** 検索・フィルター（要件定義書 §4.2） */
+function rate_filterTable(v) {
+  rate_searchVal = v.toLowerCase();
+  rate_renderTable();
+}
+
+function rate_applyMonthFilter(v) {
+  rate_filterMonth = v;
+  rate_renderTable();
+}
+
+/** モーダル（追加・編集）§4.3, §4.4 */
+function rate_openAddModal() {
+  rate_editingId = null;
+  document.getElementById('rate-modal-title').textContent = '稼働率・可動率 新規追加';
+  document.getElementById('m-record_date').value = '';
+  document.getElementById('m-operation_rate').value = '';
+  document.getElementById('m-availability_rate').value = '';
+  document.getElementById('rate-validation-msg').classList.add('hidden');
+  document.getElementById('rate-preview').classList.add('hidden');
+  document.getElementById('rate-modal-overlay').classList.remove('hidden');
+}
+
+function rate_openEditModal(id) {
+  const r = RATE_DATA.find(x => x.id === id);
+  if (!r) return;
+  rate_editingId = id;
+  document.getElementById('rate-modal-title').textContent =
+    `稼働率・可動率 編集：${rate_formatDate(r.record_date)}`;
+  document.getElementById('m-record_date').value = r.record_date;
+  document.getElementById('m-operation_rate').value = r.operation_rate;
+  document.getElementById('m-availability_rate').value = r.availability_rate;
+  document.getElementById('rate-validation-msg').classList.add('hidden');
+  rate_updatePreview();
+  document.getElementById('rate-modal-overlay').classList.remove('hidden');
+}
+
+function rate_closeModalBtn() {
+  document.getElementById('rate-modal-overlay').classList.add('hidden');
+}
+
+function rate_closeModal(e) {
+  if (e.target === document.getElementById('rate-modal-overlay')) rate_closeModalBtn();
+}
+
+/** 入力プレビュー + バリデーション（要件定義書 §5.3） */
+function rate_updatePreview() {
+  const op  = parseFloat(document.getElementById('m-operation_rate').value);
+  const av  = parseFloat(document.getElementById('m-availability_rate').value);
+  const preview = document.getElementById('rate-preview');
+  const msg     = document.getElementById('rate-validation-msg');
+
+  if (!isNaN(op) && !isNaN(av)) {
+    preview.classList.remove('hidden');
+    document.getElementById('rate-preview-op').textContent   = op.toFixed(2) + '%';
+    document.getElementById('rate-preview-av').textContent   = av.toFixed(2) + '%';
+    const diff = av - op;
+    document.getElementById('rate-preview-diff').textContent =
+      (diff >= 0 ? '+' : '') + diff.toFixed(2) + '%';
+    msg.classList.toggle('hidden', op <= av);
+  } else {
+    preview.classList.add('hidden');
+    msg.classList.add('hidden');
+  }
+}
+
+/** 保存処理（§4.3 新規追加 / §4.4 更新） */
+function rate_saveModal() {
+  const dateVal = document.getElementById('m-record_date').value.trim();
+  const opVal   = parseFloat(document.getElementById('m-operation_rate').value);
+  const avVal   = parseFloat(document.getElementById('m-availability_rate').value);
+
+  if (!dateVal)      { showToast('⚠️ 対象日を入力してください');  return; }
+  if (isNaN(opVal))  { showToast('⚠️ 稼働率を入力してください');  return; }
+  if (isNaN(avVal))  { showToast('⚠️ 可動率を入力してください');  return; }
+  if (opVal > avVal) { showToast('⚠️ 稼働率は可動率以下である必要があります（稼働率 ≦ 可動率）'); return; }
+
+  let newId;
+  if (rate_editingId) {
+    const r = RATE_DATA.find(x => x.id === rate_editingId);
+    r.record_date       = dateVal;
+    r.operation_rate    = opVal;
+    r.availability_rate = avVal;
+    newId = rate_editingId;
+    showToast(`✅ 更新しました：${rate_formatDate(dateVal)}`);
+  } else {
+    newId = Math.max(...RATE_DATA.map(x => x.id)) + 1;
+    RATE_DATA.unshift({
+      id: newId, record_date: dateVal,
+      operation_rate: opVal, availability_rate: avVal, active: true,
+    });
+    showToast(`✅ 追加しました：${rate_formatDate(dateVal)}`);
+  }
+  rate_closeModalBtn();
+  rate_renderTable(newId);
+}
+
+/** Excel出力（稼働率可動率_mockup.html より統合） */
+function rate_exportToExcel() {
+  const visible = RATE_DATA.filter(r => {
+    if (!r.active) return false;
+    if (rate_filterMonth && !r.record_date.startsWith(rate_filterMonth)) return false;
+    if (rate_searchVal && !r.record_date.includes(rate_searchVal)) return false;
+    return true;
+  });
+  if (visible.length === 0) { showToast('⚠️ 出力対象データがありません'); return; }
+
+  const wb = XLSX.utils.book_new();
+  const headers = ['ID', '対象日', '稼働率 (%)', '可動率 (%)'];
+  const rows = visible.map(function(r) {
+    return [r.id, r.record_date, r.operation_rate, r.availability_rate];
+  });
+  const ws = XLSX.utils.aoa_to_sheet([headers].concat(rows));
+
+  ws['!cols'] = [{ wch: 6 }, { wch: 14 }, { wch: 14 }, { wch: 14 }];
+
+  const headerStyle = {
+    font: { name: 'Arial', bold: true, color: { rgb: 'FFFFFF' } },
+    fill: { fgColor: { rgb: '92400E' } },
+    alignment: { horizontal: 'center', vertical: 'center' }
+  };
+  ['A1','B1','C1','D1'].forEach(function(addr) { if (ws[addr]) ws[addr].s = headerStyle; });
+
+  for (let i = 2; i <= rows.length + 1; i++) {
+    const rStyle = { font: { name: 'Arial' }, alignment: { horizontal: 'right', vertical: 'center' } };
+    const lStyle = { font: { name: 'Arial' }, alignment: { horizontal: 'left', vertical: 'center' } };
+    const nStyle = { font: { name: 'Arial' }, alignment: { horizontal: 'right', vertical: 'center' }, numFmt: '0.00' };
+    if (ws['A'+i]) ws['A'+i].s = rStyle;
+    if (ws['B'+i]) ws['B'+i].s = lStyle;
+    if (ws['C'+i]) ws['C'+i].s = nStyle;
+    if (ws['D'+i]) ws['D'+i].s = nStyle;
+  }
+
+  XLSX.utils.book_append_sheet(wb, ws, '稼働率可動率');
+  const label = rate_filterMonth ? rate_filterMonth.replace('-', '') : 'all';
+  XLSX.writeFile(wb, '稼働率可動率_' + label + '.xlsx');
+  showToast('📥 Excel出力しました（' + visible.length + ' 件）');
+}
+
+/** 削除モーダル（§4.5 論理削除） */
+function rate_openDeleteModal(id) {
+  const r = RATE_DATA.find(x => x.id === id);
+  if (!r) return;
+  rate_deletingId = id;
+  document.getElementById('rate-delete-name').textContent = rate_formatDate(r.record_date);
+  document.getElementById('rate-delete-overlay').classList.remove('hidden');
+}
+
+function rate_closeDelete() {
+  document.getElementById('rate-delete-overlay').classList.add('hidden');
+}
+
+function rate_confirmDelete() {
+  const r = RATE_DATA.find(x => x.id === rate_deletingId);
+  if (!r) return;
+  const label = rate_formatDate(r.record_date);
+  r.active = false;
+  rate_closeDelete();
+  rate_renderTable();
+  showToast(`🗑️ 論理削除しました：${label}`);
+}
+
+// ============================================================
+//  INIT
+// ============================================================
+permRenderTable();
+permUpdateBulkButtons();
+</script>
+</body>
+</html>
